@@ -436,6 +436,48 @@ input[type="range"] {
   font-size: 0.86rem;
 }
 
+.edit-mode-btn {
+  display: none;
+}
+
+body.view-mode {
+  background: var(--shell-bg);
+}
+
+body.view-mode .top-actions,
+body.view-mode .editor {
+  display: none;
+}
+
+body.view-mode .topbar {
+  justify-content: center;
+  text-align: center;
+}
+
+body.view-mode .workspace {
+  display: block;
+}
+
+body.view-mode .preview-area {
+  position: static;
+  max-height: none;
+  overflow: visible;
+}
+
+body.view-mode .preview-toolbar {
+  width: min(100%, 430px);
+  margin: 0 auto 10px;
+}
+
+body.view-mode .preview-toolbar > span {
+  display: none;
+}
+
+body.view-mode .edit-mode-btn {
+  display: inline-flex;
+  width: 100%;
+}
+
 .line-card {
   --page-bg: #e9fff2;
   --card-bg: #ffffff;

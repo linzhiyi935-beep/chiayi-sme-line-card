@@ -130,8 +130,12 @@ let state = loadState();
 const saveStatus = document.querySelector("#saveStatus");
 const toast = document.querySelector("#toast");
 const caseDialog = document.querySelector("#caseDialog");
+let isCardMode = new URLSearchParams(window.location.search).has("card");
 
 function loadState() {
+  const sharedState = readStateFromUrl();
+  if (sharedState) return sharedState;
+
   const saved = localStorage.getItem("lineCardState");
   if (!saved) return structuredClone(defaultState);
   try {
@@ -145,6 +149,40 @@ function loadState() {
   } catch {
     return structuredClone(defaultState);
   }
+}
+
+function readStateFromUrl() {
+  const encoded = new URLSearchParams(window.location.search).get("card");
+  if (!encoded) return null;
+
+  try {
+    const decoded = decodeBase64Url(encoded);
+    const parsed = JSON.parse(decoded);
+    return {
+      ...structuredClone(defaultState),
+      ...parsed,
+      colors: { ...defaultState.colors, ...(parsed.colors || {}) },
+      cases: Array.isArray(parsed.cases) ? parsed.cases : structuredClone(defaultState.cases),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function encodeBase64Url(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+
+function decodeBase64Url(text) {
+  const base64 = text.replaceAll("-", "+").replaceAll("_", "/").padEnd(Math.ceil(text.length / 4) * 4, "=");
+  const binary = atob(base64);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
 }
 
 function persist() {
@@ -167,6 +205,10 @@ function safeValue(value, fallback = "尚未填寫") {
   return String(value || "").trim() || fallback;
 }
 
+function applyMode() {
+  document.body.classList.toggle("view-mode", isCardMode);
+}
+
 function makeLink(url) {
   const value = String(url || "").trim();
   if (!value) return "#";
@@ -176,13 +218,13 @@ function makeLink(url) {
   return `https://${value}`;
 }
 
-function buildShareText() {
+function buildShareText(publicUrl = state.publicCardUrl) {
   const lines = [
     state.displayName,
     state.company,
     state.bio,
     state.products ? `產品 / 服務：${state.products}` : "",
-    state.publicCardUrl ? `我的數位名片：${makeLink(state.publicCardUrl)}` : "",
+    publicUrl ? `我的數位名片：${makeLink(publicUrl)}` : "",
     state.phone ? `電話：${state.phone}` : "",
     state.lineId ? `LINE：${state.lineId}` : "",
     state.website ? `網站：${makeLink(state.website)}` : "",
@@ -205,6 +247,39 @@ function buildShareText() {
   }
 
   return lines.join("\n");
+}
+
+function imageForShare(src) {
+  if (!src || !src.startsWith("data:")) return src || "";
+  return src.length <= 120000 ? src : "";
+}
+
+function getPortableState() {
+  let omittedImages = false;
+  const portable = structuredClone(state);
+
+  const avatar = imageForShare(portable.avatar);
+  const cover = imageForShare(portable.cover);
+  omittedImages ||= Boolean(portable.avatar && !avatar);
+  omittedImages ||= Boolean(portable.cover && !cover);
+  portable.avatar = avatar || placeholderAvatar;
+  portable.cover = cover;
+
+  portable.cases = portable.cases.map((item) => {
+    const image = imageForShare(item.image);
+    omittedImages ||= Boolean(item.image && !image);
+    return { ...item, image: image || placeholderCase };
+  });
+
+  return { portable, omittedImages };
+}
+
+function makePublicCardUrl() {
+  const { portable, omittedImages } = getPortableState();
+  portable.publicCardUrl = "";
+  const encoded = encodeBase64Url(JSON.stringify(portable));
+  const url = `${window.location.origin}${window.location.pathname}?card=${encoded}`;
+  return { url, omittedImages };
 }
 
 function downloadTextFile(filename, content, mimeType = "text/plain;charset=utf-8") {
@@ -608,13 +683,40 @@ function attachEvents() {
   });
 
   document.querySelector("#copyShareBtn").addEventListener("click", async () => {
-    const copied = await copyText(buildShareText());
-    showToast(copied ? "可點擊分享文字已複製" : "無法自動複製，請改用分享 LINE");
+    const { url, omittedImages } = makePublicCardUrl();
+    state.publicCardUrl = url;
+    syncInputs();
+    persist();
+    const copied = await copyText(buildShareText(url));
+    showToast(copied ? `可點擊分享文字已複製${omittedImages ? "，部分大圖未放入連結" : ""}` : "無法自動複製，請改用分享 LINE");
   });
 
   document.querySelector("#lineShareBtn").addEventListener("click", () => {
-    const shareUrl = `https://line.me/R/msg/text/?${encodeURIComponent(buildShareText())}`;
+    const { url, omittedImages } = makePublicCardUrl();
+    state.publicCardUrl = url;
+    syncInputs();
+    persist();
+    const shareUrl = `https://line.me/R/msg/text/?${encodeURIComponent(buildShareText(url))}`;
+    if (omittedImages) showToast("部分上傳圖片太大，公開連結會以預設圖呈現");
     window.open(shareUrl, "_blank", "noopener,noreferrer");
+  });
+
+  document.querySelector("#publicLinkBtn").addEventListener("click", async () => {
+    const { url, omittedImages } = makePublicCardUrl();
+    state.publicCardUrl = url;
+    syncInputs();
+    persist();
+    const copied = await copyText(url);
+    showToast(copied ? `公開名片連結已複製${omittedImages ? "，部分大圖未放入連結" : ""}` : "公開名片連結已產生");
+  });
+
+  document.querySelector("#editModeBtn").addEventListener("click", () => {
+    isCardMode = false;
+    window.history.replaceState({}, "", `${window.location.origin}${window.location.pathname}`);
+    persist();
+    applyMode();
+    syncInputs();
+    render(true);
   });
 
   document.querySelector("#exportHtmlBtn").addEventListener("click", () => {
@@ -649,4 +751,5 @@ function attachEvents() {
 renderThemeButtons();
 syncInputs();
 attachEvents();
+applyMode();
 render(true);
