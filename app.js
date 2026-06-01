@@ -135,6 +135,12 @@ const caseDialog = document.querySelector("#caseDialog");
 let isCardMode = new URLSearchParams(window.location.search).has("card");
 
 function loadState() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("fresh") === "1" && !params.has("card")) {
+    localStorage.removeItem("lineCardState");
+    window.history.replaceState({}, "", `${window.location.origin}${window.location.pathname}`);
+  }
+
   const sharedState = readStateFromUrl();
   if (sharedState) return sharedState;
 
