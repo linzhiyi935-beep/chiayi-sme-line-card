@@ -132,7 +132,13 @@ let state = loadState();
 const saveStatus = document.querySelector("#saveStatus");
 const toast = document.querySelector("#toast");
 const caseDialog = document.querySelector("#caseDialog");
-let isCardMode = new URLSearchParams(window.location.search).has("card");
+let isCardMode = hasSharedCard();
+
+function hasSharedCard() {
+  const params = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  return params.has("card") || hashParams.has("card");
+}
 
 function loadState() {
   const params = new URLSearchParams(window.location.search);
@@ -160,7 +166,9 @@ function loadState() {
 }
 
 function readStateFromUrl() {
-  const encoded = new URLSearchParams(window.location.search).get("card");
+  const params = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const encoded = params.get("card") || hashParams.get("card");
   if (!encoded) return null;
 
   try {
@@ -215,6 +223,17 @@ function safeValue(value, fallback = "尚未填寫") {
 
 function applyMode() {
   document.body.classList.toggle("view-mode", isCardMode);
+}
+
+function loadSharedCardFromCurrentUrl() {
+  const sharedState = readStateFromUrl();
+  if (!sharedState) return false;
+  state = sharedState;
+  isCardMode = true;
+  applyMode();
+  syncInputs();
+  render(true);
+  return true;
 }
 
 function makeLink(url) {
@@ -293,7 +312,7 @@ function makePublicCardUrl() {
   const { portable, omittedImages } = getPortableState();
   const encoded = encodeBase64Url(JSON.stringify(portable));
   const baseUrl = getShareBaseUrl();
-  const url = `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}card=${encoded}`;
+  const url = `${baseUrl}#card=${encoded}`;
   return { url, omittedImages };
 }
 
@@ -718,7 +737,7 @@ function attachEvents() {
     syncInputs();
     persist();
     const message = `${state.displayName || "我的 LINE 數位名片"}\n${url}`;
-    const shareUrl = `https://social-plugins.line.me/lineit/share?url=${encodeURIComponent(url)}&text=${encodeURIComponent(message)}`;
+    const shareUrl = `https://line.me/R/msg/text/?${encodeURIComponent(message)}`;
     window.open(shareUrl, "_blank", "noopener,noreferrer");
     await copyText(url);
     showToast(`已打開 LINE 分享並複製公開連結${omittedImages ? "，部分大圖未放入連結" : ""}`);
@@ -768,6 +787,10 @@ function attachEvents() {
   document.querySelector("#closeDialogBtn").addEventListener("click", () => caseDialog.close());
   caseDialog.addEventListener("click", (event) => {
     if (event.target === caseDialog) caseDialog.close();
+  });
+
+  window.addEventListener("hashchange", () => {
+    loadSharedCardFromCurrentUrl();
   });
 }
 
