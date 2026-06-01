@@ -278,7 +278,7 @@ function buildShareText(publicUrl = state.publicCardUrl) {
 
 function imageForShare(src) {
   if (!src || !src.startsWith("data:")) return src || "";
-  return src.length <= 120000 ? src : "";
+  return "";
 }
 
 function getPortableState() {
@@ -313,6 +313,19 @@ function makePublicCardUrl() {
   const encoded = encodeBase64Url(JSON.stringify(portable));
   const baseUrl = getShareBaseUrl();
   const url = `${baseUrl}#card=${encoded}`;
+  return { url, omittedImages };
+}
+
+function makeLineShareUrl(url) {
+  const message = `${state.displayName || "我的 LINE 數位名片"}\n${url}`;
+  return `line://msg/text/${encodeURIComponent(message)}`;
+}
+
+function preparePublicShare() {
+  const { url, omittedImages } = makePublicCardUrl();
+  state.publicCardUrl = url;
+  syncInputs();
+  persist();
   return { url, omittedImages };
 }
 
@@ -723,31 +736,25 @@ function attachEvents() {
   });
 
   document.querySelector("#copyShareBtn").addEventListener("click", async () => {
-    const { url, omittedImages } = makePublicCardUrl();
-    state.publicCardUrl = url;
-    syncInputs();
-    persist();
+    const { url, omittedImages } = preparePublicShare();
     const copied = await copyText(buildShareText(url));
     showToast(copied ? `可點擊分享文字已複製${omittedImages ? "，部分大圖未放入連結" : ""}` : "無法自動複製，請改用分享 LINE");
   });
 
+  document.querySelector("#lineShareBtn").addEventListener("pointerdown", () => {
+    const { url } = preparePublicShare();
+    document.querySelector("#lineShareBtn").href = makeLineShareUrl(url);
+  });
+
   document.querySelector("#lineShareBtn").addEventListener("click", async () => {
-    const { url, omittedImages } = makePublicCardUrl();
-    state.publicCardUrl = url;
-    syncInputs();
-    persist();
-    const message = `${state.displayName || "我的 LINE 數位名片"}\n${url}`;
-    const shareUrl = `https://line.me/R/msg/text/?${encodeURIComponent(message)}`;
-    window.open(shareUrl, "_blank", "noopener,noreferrer");
-    await copyText(url);
-    showToast(`已打開 LINE 分享並複製公開連結${omittedImages ? "，部分大圖未放入連結" : ""}`);
+    const { url, omittedImages } = preparePublicShare();
+    document.querySelector("#lineShareBtn").href = makeLineShareUrl(url);
+    copyText(url);
+    showToast(`正在開啟 LINE App，公開連結也已複製${omittedImages ? "，分享連結不包含上傳圖片" : ""}`);
   });
 
   document.querySelector("#publicLinkBtn").addEventListener("click", async () => {
-    const { url, omittedImages } = makePublicCardUrl();
-    state.publicCardUrl = url;
-    syncInputs();
-    persist();
+    const { url, omittedImages } = preparePublicShare();
     const copied = await copyText(url);
     showToast(copied ? `公開名片連結已複製${omittedImages ? "，部分大圖未放入連結" : ""}` : "公開名片連結已產生");
   });

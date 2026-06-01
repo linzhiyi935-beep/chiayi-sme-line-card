@@ -36,6 +36,12 @@ button {
   cursor: pointer;
 }
 
+a.ghost-btn,
+a.solid-btn,
+a.wide-btn {
+  text-decoration: none;
+}
+
 textarea {
   resize: vertical;
 }
