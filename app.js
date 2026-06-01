@@ -23,6 +23,8 @@ const placeholderCase =
     <path d="M88 238 188 166l70 52 52-40 82 60" fill="none" stroke="#06c755" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`);
 
+const PUBLIC_SITE_URL = "https://linzhiyi935-beep.github.io/chiayi-sme-line-card/";
+
 const themes = [
   {
     name: "LINE 清新",
@@ -257,28 +259,35 @@ function imageForShare(src) {
 function getPortableState() {
   let omittedImages = false;
   const portable = structuredClone(state);
+  portable.publicCardUrl = "";
 
   const avatar = imageForShare(portable.avatar);
   const cover = imageForShare(portable.cover);
   omittedImages ||= Boolean(portable.avatar && !avatar);
   omittedImages ||= Boolean(portable.cover && !cover);
-  portable.avatar = avatar || placeholderAvatar;
+  portable.avatar = avatar === placeholderAvatar ? "" : avatar;
   portable.cover = cover;
 
   portable.cases = portable.cases.map((item) => {
     const image = imageForShare(item.image);
     omittedImages ||= Boolean(item.image && !image);
-    return { ...item, image: image || placeholderCase };
+    return { ...item, image: image === placeholderCase ? "" : image };
   });
 
   return { portable, omittedImages };
 }
 
+function getShareBaseUrl() {
+  const isLocal = ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
+  if (isLocal || window.location.protocol === "file:") return PUBLIC_SITE_URL;
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
 function makePublicCardUrl() {
   const { portable, omittedImages } = getPortableState();
-  portable.publicCardUrl = "";
   const encoded = encodeBase64Url(JSON.stringify(portable));
-  const url = `${window.location.origin}${window.location.pathname}?card=${encoded}`;
+  const baseUrl = getShareBaseUrl();
+  const url = `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}card=${encoded}`;
   return { url, omittedImages };
 }
 
@@ -549,6 +558,12 @@ function render(shouldRenderEditors = false) {
     const cssKey = key.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
     card.style.setProperty(`--${cssKey}`, value);
   });
+  card.style.setProperty("--card-border", state.colors.border);
+  card.style.setProperty("--text-color", state.colors.text);
+  card.style.setProperty("--muted-color", state.colors.muted);
+  card.style.setProperty("--button-color", state.colors.button);
+  card.style.setProperty("--button-text", state.colors.buttonText);
+  card.style.setProperty("--accent-color", state.colors.accent);
   card.style.setProperty("--card-border-width", `${state.borderWidth}px`);
   card.style.setProperty("--card-radius", `${state.radius}px`);
   document.body.style.setProperty("--shell-bg", state.colors.pageBg);
@@ -691,14 +706,16 @@ function attachEvents() {
     showToast(copied ? `可點擊分享文字已複製${omittedImages ? "，部分大圖未放入連結" : ""}` : "無法自動複製，請改用分享 LINE");
   });
 
-  document.querySelector("#lineShareBtn").addEventListener("click", () => {
+  document.querySelector("#lineShareBtn").addEventListener("click", async () => {
     const { url, omittedImages } = makePublicCardUrl();
     state.publicCardUrl = url;
     syncInputs();
     persist();
-    const shareUrl = `https://line.me/R/msg/text/?${encodeURIComponent(buildShareText(url))}`;
-    if (omittedImages) showToast("部分上傳圖片太大，公開連結會以預設圖呈現");
+    const message = `${state.displayName || "我的 LINE 數位名片"}\n${url}`;
+    const shareUrl = `https://social-plugins.line.me/lineit/share?url=${encodeURIComponent(url)}&text=${encodeURIComponent(message)}`;
     window.open(shareUrl, "_blank", "noopener,noreferrer");
+    await copyText(url);
+    showToast(`已打開 LINE 分享並複製公開連結${omittedImages ? "，部分大圖未放入連結" : ""}`);
   });
 
   document.querySelector("#publicLinkBtn").addEventListener("click", async () => {
