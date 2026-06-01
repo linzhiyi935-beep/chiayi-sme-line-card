@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LINE 數位名片生成器</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">LINE Digital Card</p>
+          <h1>數位名片生成器</h1>
+        </div>
+        <div class="top-actions">
+          <button class="ghost-btn" id="resetBtn" type="button">
+            <i data-lucide="rotate-ccw"></i>
+            重設
+          </button>
+          <button class="ghost-btn" id="lineShareBtn" type="button">
+            <i data-lucide="send"></i>
+            分享 LINE
+          </button>
+          <button class="ghost-btn" id="exportHtmlBtn" type="button">
+            <i data-lucide="file-code-2"></i>
+            匯出網頁
+          </button>
+          <button class="solid-btn" id="downloadBtn" type="button">
+            <i data-lucide="download"></i>
+            下載圖片
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="editor" aria-label="名片編輯區">
+          <nav class="mobile-jump" aria-label="快速切換">
+            <a href="#contentPanel">內容</a>
+            <a href="#stylePanel">風格</a>
+            <a href="#galleryPanel">案例/菜單</a>
+            <a href="#previewPanel">預覽</a>
+          </nav>
+
+          <details class="panel" id="contentPanel" open>
+            <summary>
+              <span>1. 基本內容</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <div class="panel-body">
+              <div class="upload-row">
+                <label class="upload-card">
+                  <input id="avatarUpload" type="file" accept="image/*" />
+                  <span class="upload-icon"><i data-lucide="image-plus"></i></span>
+                  <span>上傳大頭貼</span>
+                </label>
+                <label class="upload-card">
+                  <input id="coverUpload" type="file" accept="image/*" />
+                  <span class="upload-icon"><i data-lucide="image"></i></span>
+                  <span>上傳封面照片</span>
+                </label>
+              </div>
+
+              <div class="grid-2">
+                <label>
+                  名片名稱
+                  <input data-field="displayName" type="text" placeholder="例如：Emma 美學工作室" />
+                </label>
+                <label>
+                  公司名稱
+                  <input data-field="company" type="text" placeholder="例如：晨光設計有限公司" />
+                </label>
+                <label>
+                  中文名字
+                  <input data-field="chineseName" type="text" placeholder="例如：王小晴" />
+                </label>
+                <label>
+                  英文名字
+                  <input data-field="englishName" type="text" placeholder="例如：Emma Wang" />
+                </label>
+              </div>
+
+              <label>
+                個人介紹
+                <textarea data-field="bio" rows="4" placeholder="用 2 到 4 句話說明你能幫客戶完成什麼。"></textarea>
+              </label>
+
+              <label>
+                產品 / 服務
+                <textarea data-field="products" rows="3" placeholder="例如：品牌設計、菜單拍攝、LINE 官方帳號建置"></textarea>
+              </label>
+            </div>
+          </details>
+
+          <details class="panel" id="contactPanel" open>
+            <summary>
+              <span>2. 聯絡資訊</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <div class="panel-body">
+              <div class="grid-2">
+                <label>
+                  電話
+                  <input data-field="phone" type="tel" placeholder="例如：0912-345-678" />
+                </label>
+                <label>
+                  LINE ID
+                  <input data-field="lineId" type="text" placeholder="例如：@myline" />
+                </label>
+                <label>
+                  地址
+                  <input data-field="address" type="text" placeholder="例如：台北市信義區..." />
+                </label>
+                <label>
+                  網頁連結
+                  <input data-field="website" type="url" placeholder="https://example.com" />
+                </label>
+                <label>
+                  公開名片網址
+                  <input data-field="publicCardUrl" type="url" placeholder="上傳互動網頁後，貼上公開網址" />
+                </label>
+                <label>
+                  Instagram / 社群
+                  <input data-field="social" type="url" placeholder="https://instagram.com/..." />
+                </label>
+                <label>
+                  Email
+                  <input data-field="email" type="email" placeholder="hello@example.com" />
+                </label>
+              </div>
+              <button class="wide-btn" id="copyShareBtn" type="button">
+                <i data-lucide="copy"></i>
+                複製分享文字
+              </button>
+              <div class="share-note">
+                <i data-lucide="info"></i>
+                <span>要讓對方能點連結，請分享 LINE 文字或公開網址；單純圖片裡的字無法點擊。</span>
+              </div>
+            </div>
+          </details>
+
+          <details class="panel" id="stylePanel" open>
+            <summary>
+              <span>3. 外觀風格</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <div class="panel-body">
+              <div class="field-title">快速套色</div>
+              <div class="theme-grid" id="themeGrid" aria-label="快速套色"></div>
+
+              <div class="segmented-group">
+                <div class="field-title">大頭貼形狀</div>
+                <div class="segmented" role="radiogroup" aria-label="大頭貼形狀">
+                  <button type="button" data-avatar-shape="circle">圓形</button>
+                  <button type="button" data-avatar-shape="square">方形</button>
+                  <button type="button" data-avatar-shape="full">滿版</button>
+                </div>
+              </div>
+
+              <label>
+                大頭貼特效
+                <select data-field="avatarEffect">
+                  <option value="none">自然</option>
+                  <option value="soft">柔光</option>
+                  <option value="glow">發光邊框</option>
+                  <option value="bw">黑白質感</option>
+                  <option value="warm">暖色濾鏡</option>
+                  <option value="pop">鮮明強化</option>
+                </select>
+              </label>
+
+              <div class="color-grid">
+                <label>
+                  頁面背景
+                  <input data-color="pageBg" type="color" />
+                </label>
+                <label>
+                  名片背景
+                  <input data-color="cardBg" type="color" />
+                </label>
+                <label>
+                  邊框
+                  <input data-color="border" type="color" />
+                </label>
+                <label>
+                  主要文字
+                  <input data-color="text" type="color" />
+                </label>
+                <label>
+                  次要文字
+                  <input data-color="muted" type="color" />
+                </label>
+                <label>
+                  按鈕
+                  <input data-color="button" type="color" />
+                </label>
+                <label>
+                  按鈕文字
+                  <input data-color="buttonText" type="color" />
+                </label>
+                <label>
+                  標籤背景
+                  <input data-color="chipBg" type="color" />
+                </label>
+                <label>
+                  案例區背景
+                  <input data-color="caseBg" type="color" />
+                </label>
+                <label>
+                  亮點色
+                  <input data-color="accent" type="color" />
+                </label>
+              </div>
+
+              <div class="range-grid">
+                <label>
+                  邊框粗細
+                  <input data-field="borderWidth" type="range" min="0" max="8" step="1" />
+                </label>
+                <label>
+                  圓角大小
+                  <input data-field="radius" type="range" min="0" max="32" step="1" />
+                </label>
+              </div>
+            </div>
+          </details>
+
+          <details class="panel" id="galleryPanel" open>
+            <summary>
+              <span>4. 作品案例 / 菜單</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <div class="panel-body">
+              <div class="case-toolbar">
+                <label>
+                  區塊標題
+                  <input data-field="caseTitle" type="text" placeholder="作品案例 / 精選菜單" />
+                </label>
+                <button class="solid-btn small" id="addCaseBtn" type="button">
+                  <i data-lucide="plus"></i>
+                  新增
+                </button>
+              </div>
+              <div class="case-editor-list" id="caseEditorList"></div>
+            </div>
+          </details>
+        </section>
+
+        <aside class="preview-area" id="previewPanel" aria-label="名片預覽">
+          <div class="preview-toolbar">
+            <span>即時預覽</span>
+            <span id="saveStatus">已自動保存</span>
+          </div>
+          <article class="line-card" id="cardCanvas">
+            <div class="cover" id="previewCover"></div>
+            <div class="card-inner">
+              <div class="profile-block">
+                <div class="avatar-wrap" id="avatarWrap">
+                  <img id="previewAvatar" alt="大頭貼預覽" />
+                </div>
+                <div class="profile-copy">
+                  <p class="company" id="previewCompany"></p>
+                  <h2 id="previewDisplayName"></h2>
+                  <p class="name-line">
+                    <span id="previewChineseName"></span>
+                    <span id="previewEnglishName"></span>
+                  </p>
+                </div>
+              </div>
+
+              <p class="bio" id="previewBio"></p>
+
+              <div class="section-block">
+                <h3>產品 / 服務</h3>
+                <p id="previewProducts"></p>
+              </div>
+
+              <div class="quick-actions">
+                <a id="phoneAction" href="#"><i data-lucide="phone"></i><span>電話</span></a>
+                <a id="lineAction" href="#"><i data-lucide="message-circle"></i><span>LINE</span></a>
+                <a id="webAction" href="#"><i data-lucide="globe"></i><span>網站</span></a>
+              </div>
+
+              <div class="contact-list" id="previewContacts"></div>
+
+              <div class="case-section">
+                <div class="section-heading">
+                  <h3 id="previewCaseTitle"></h3>
+                  <span>可點開查看</span>
+                </div>
+                <div class="case-list" id="previewCases"></div>
+              </div>
+            </div>
+          </article>
+        </aside>
+      </main>
+    </div>
+
+    <dialog class="case-dialog" id="caseDialog">
+      <button class="dialog-close" id="closeDialogBtn" type="button" aria-label="關閉">
+        <i data-lucide="x"></i>
+      </button>
+      <img id="dialogImage" alt="" />
+      <div class="dialog-body">
+        <p id="dialogCategory"></p>
+        <h2 id="dialogTitle"></h2>
+        <p id="dialogDescription"></p>
+        <a id="dialogLink" target="_blank" rel="noreferrer">查看連結</a>
+      </div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
