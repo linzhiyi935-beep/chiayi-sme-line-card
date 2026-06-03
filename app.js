@@ -24,6 +24,8 @@ const placeholderCase =
   </svg>`);
 
 const PUBLIC_SITE_URL = "https://linzhiyi935-beep.github.io/chiayi-sme-line-card/";
+const LIFF_ID = "2010280088-IG7ReTtB";
+const LIFF_URL = `https://liff.line.me/${LIFF_ID}`;
 
 const themes = [
   {
@@ -317,20 +319,226 @@ function makePublicCardUrl() {
   const encoded = encodeBase64Url(JSON.stringify(portable));
   const baseUrl = getShareBaseUrl();
   const url = `${baseUrl}#card=${encoded}`;
-  return { url, omittedImages };
+  return { url, encoded, omittedImages };
 }
 
-function makeLineShareUrl(url) {
-  const message = `${state.displayName || "我的 LINE 數位名片"}\n${url}`;
-  return `line://msg/text/${encodeURIComponent(message)}`;
+function clampText(value, limit, fallback = "") {
+  const text = String(value || fallback || "").trim();
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit - 1)}…`;
+}
+
+function asFlexColor(value, fallback) {
+  return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? value : fallback;
+}
+
+function optionalText(text, options = {}) {
+  const value = clampText(text, options.limit || 80);
+  if (!value) return null;
+  return {
+    type: "text",
+    text: value,
+    size: options.size || "sm",
+    color: options.color || asFlexColor(state.colors.muted, "#64726d"),
+    wrap: true,
+    margin: options.margin || "sm",
+    weight: options.weight || "regular",
+  };
+}
+
+function optionalButton(label, uri, options = {}) {
+  const href = makeLink(uri);
+  if (!uri || href === "#") return null;
+  return {
+    type: "button",
+    style: options.style || "link",
+    height: "sm",
+    action: {
+      type: "uri",
+      label: clampText(label, 20, "開啟連結"),
+      uri: href,
+    },
+  };
+}
+
+function makeLineProfileUrl(lineId) {
+  const value = String(lineId || "").trim();
+  if (!value) return "";
+  return `https://line.me/R/ti/p/${encodeURIComponent(value)}`;
+}
+
+function buildFlexBusinessCard(publicUrl) {
+  const bg = asFlexColor(state.colors.cardBg, "#ffffff");
+  const text = asFlexColor(state.colors.text, "#183128");
+  const muted = asFlexColor(state.colors.muted, "#64726d");
+  const accent = asFlexColor(state.colors.accent, "#19a866");
+  const button = asFlexColor(state.colors.button, "#06c755");
+  const chipBg = asFlexColor(state.colors.chipBg, "#e6f9ee");
+  const caseBg = asFlexColor(state.colors.caseBg, "#f6faf8");
+
+  const productText = clampText(state.products, 220);
+  const contactLines = [
+    state.phone ? `電話：${state.phone}` : "",
+    state.lineId ? `LINE：${state.lineId}` : "",
+    state.email ? `Email：${state.email}` : "",
+    state.address ? `地址：${state.address}` : "",
+  ].filter(Boolean);
+
+  const caseButtons = state.cases
+    .filter((item) => String(item.title || item.link || "").trim() && String(item.link || "").trim())
+    .slice(0, 3)
+    .map((item, index) => optionalButton(item.title || `作品 ${index + 1}`, item.link, { style: "link" }))
+    .filter(Boolean);
+
+  const heroTexts = [
+    {
+      type: "text",
+      text: clampText(state.company, 44, "LINE 數位名片"),
+      size: "xs",
+      weight: "bold",
+      color: accent,
+      wrap: true,
+    },
+    {
+      type: "text",
+      text: clampText(state.displayName, 38, "我的 LINE 數位名片"),
+      size: "xl",
+      weight: "bold",
+      color: text,
+      wrap: true,
+      margin: "sm",
+    },
+    optionalText([state.chineseName, state.englishName].filter(Boolean).join(" / "), {
+      color: muted,
+      limit: 48,
+    }),
+    optionalText(state.bio, {
+      color: text,
+      limit: 180,
+      margin: "md",
+    }),
+  ].filter(Boolean);
+
+  const contents = [
+    {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: chipBg,
+      cornerRadius: "md",
+      paddingAll: "12px",
+      contents: heroTexts,
+    },
+  ];
+
+  if (productText) {
+    contents.push({
+      type: "box",
+      layout: "vertical",
+      margin: "md",
+      backgroundColor: caseBg,
+      cornerRadius: "md",
+      paddingAll: "12px",
+      contents: [
+        { type: "text", text: "產品 / 服務", size: "xs", weight: "bold", color: accent },
+        { type: "text", text: productText, size: "sm", color: muted, wrap: true, margin: "xs" },
+      ],
+    });
+  }
+
+  if (contactLines.length) {
+    contents.push({
+      type: "box",
+      layout: "vertical",
+      margin: "md",
+      spacing: "xs",
+      contents: contactLines.slice(0, 4).map((line) => ({
+        type: "text",
+        text: clampText(line, 90),
+        size: "xs",
+        color: muted,
+        wrap: true,
+      })),
+    });
+  }
+
+  const footerButtons = [
+    optionalButton("查看完整名片", publicUrl, { style: "primary" }),
+    optionalButton("撥打電話", state.phone ? `tel:${state.phone.replace(/[^\d+]/g, "")}` : "", { style: "link" }),
+    optionalButton("加 LINE", makeLineProfileUrl(state.lineId), { style: "link" }),
+    optionalButton("官方網站", state.website, { style: "link" }),
+    optionalButton("社群連結", state.social, { style: "link" }),
+    ...caseButtons,
+  ].filter(Boolean);
+
+  if (footerButtons[0]) {
+    footerButtons[0].color = button;
+    footerButtons[0].action.label = "查看完整名片";
+  }
+
+  return {
+    type: "flex",
+    altText: clampText(`${state.displayName || "我的"} LINE 數位名片`, 400),
+    contents: {
+      type: "bubble",
+      size: "mega",
+      body: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: bg,
+        paddingAll: "18px",
+        contents,
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        backgroundColor: bg,
+        contents: footerButtons.length
+          ? footerButtons
+          : [
+              {
+                type: "text",
+                text: "請在名片中加入至少一個可點擊連結",
+                size: "sm",
+                color: muted,
+                wrap: true,
+              },
+            ],
+      },
+      styles: {
+        footer: {
+          separator: true,
+          separatorColor: asFlexColor(state.colors.border, "#06c755"),
+        },
+      },
+    },
+  };
+}
+
+async function shareFlexCardToLine(url) {
+  if (!window.liff || !LIFF_ID) return "unavailable";
+
+  await window.liff.init({ liffId: LIFF_ID });
+
+  if (!window.liff.isLoggedIn()) {
+    window.liff.login({ redirectUri: window.location.href });
+    return "login";
+  }
+
+  if (!window.liff.isApiAvailable("shareTargetPicker")) {
+    return "unavailable";
+  }
+
+  const result = await window.liff.shareTargetPicker([buildFlexBusinessCard(url)]);
+  return result ? "shared" : "cancelled";
 }
 
 function preparePublicShare() {
-  const { url, omittedImages } = makePublicCardUrl();
+  const { url, encoded, omittedImages } = makePublicCardUrl();
   state.publicCardUrl = url;
   syncInputs();
   persist();
-  return { url, omittedImages };
+  return { url, encoded, omittedImages };
 }
 
 async function copyText(text) {
@@ -644,16 +852,34 @@ function attachEvents() {
     showToast(copied ? `可點擊分享文字已複製${omittedImages ? "，部分大圖未放入連結" : ""}` : "無法自動複製，請改用分享 LINE");
   });
 
-  document.querySelector("#lineShareBtn").addEventListener("pointerdown", () => {
-    const { url } = preparePublicShare();
-    document.querySelector("#lineShareBtn").href = makeLineShareUrl(url);
-  });
+  document.querySelector("#lineShareBtn").addEventListener("click", async (event) => {
+    event.preventDefault();
+    const { url, encoded, omittedImages } = preparePublicShare();
+    const copied = await copyText(url);
+    try {
+      const shareStatus = await shareFlexCardToLine(url);
+      if (shareStatus === "shared") {
+        showToast(`LINE 名片已送出${omittedImages ? "，上傳圖片會留在本機預覽" : ""}`);
+        return;
+      }
+      if (shareStatus === "login") {
+        showToast("正在前往 LINE 登入授權，完成後再按一次送出名片");
+        return;
+      }
+      if (shareStatus === "cancelled") {
+        showToast("已取消 LINE 分享");
+        return;
+      }
+    } catch (error) {
+      console.warn("LINE LIFF share failed", error);
+    }
 
-  document.querySelector("#lineShareBtn").addEventListener("click", async () => {
-    const { url, omittedImages } = preparePublicShare();
-    document.querySelector("#lineShareBtn").href = makeLineShareUrl(url);
-    copyText(url);
-    showToast(`正在開啟 LINE App，公開連結也已複製${omittedImages ? "，分享連結不包含上傳圖片" : ""}`);
+    const liffLink = `${LIFF_URL}?card=${encoded}`;
+    document.querySelector("#lineShareBtn").href = liffLink;
+    showToast(copied ? "請用手機 LINE 開啟本頁或 LIFF 連結；公開名片連結已先複製" : "請用手機 LINE 開啟本頁或 LIFF 連結");
+    window.setTimeout(() => {
+      window.location.href = liffLink;
+    }, 500);
   });
 
   document.querySelector("#publicLinkBtn").addEventListener("click", async () => {
