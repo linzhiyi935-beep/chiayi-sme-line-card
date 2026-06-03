@@ -304,15 +304,17 @@ http
     }
 
     const pathname = new URL(req.url, "http://localhost").pathname;
-    if (req.method === "GET" && pathname === "/health") {
+    const cleanPath = pathname.replace(/\/+$/, "") || "/";
+
+    if (req.method === "GET" && cleanPath === "/health") {
       sendJson(res, 200, { ok: true });
       return;
     }
-    if (req.method === "POST" && pathname === "/api/send-card") {
+    if (req.method === "POST" && cleanPath === "/api/send-card") {
       await handleSendCard(req, res);
       return;
     }
-    if (req.method === "POST" && pathname === "/webhook") {
+    if (req.method === "POST" && cleanPath === "/webhook") {
       await handleWebhook(req, res);
       return;
     }
