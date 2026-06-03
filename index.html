@@ -29,10 +29,6 @@
             <i data-lucide="link"></i>
             產生公開連結
           </button>
-          <button class="ghost-btn" id="exportHtmlBtn" type="button">
-            <i data-lucide="file-code-2"></i>
-            匯出網頁
-          </button>
           <button class="solid-btn" id="downloadBtn" type="button">
             <i data-lucide="download"></i>
             下載圖片
@@ -175,6 +171,25 @@
                   <option value="pop">鮮明強化</option>
                 </select>
               </label>
+
+              <div class="range-grid">
+                <label>
+                  大頭貼左右位置
+                  <input data-field="avatarPosX" type="range" min="0" max="100" step="1" />
+                </label>
+                <label>
+                  大頭貼上下位置
+                  <input data-field="avatarPosY" type="range" min="0" max="100" step="1" />
+                </label>
+                <label>
+                  封面左右位置
+                  <input data-field="coverPosX" type="range" min="0" max="100" step="1" />
+                </label>
+                <label>
+                  封面上下位置
+                  <input data-field="coverPosY" type="range" min="0" max="100" step="1" />
+                </label>
+              </div>
 
               <div class="color-grid">
                 <label>

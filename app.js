@@ -107,6 +107,10 @@ const defaultState = {
   cover: "",
   avatarShape: "circle",
   avatarEffect: "soft",
+  avatarPosX: 50,
+  avatarPosY: 50,
+  coverPosX: 50,
+  coverPosY: 50,
   borderWidth: 2,
   radius: 24,
   colors: { ...themes[0].colors },
@@ -329,16 +333,6 @@ function preparePublicShare() {
   return { url, omittedImages };
 }
 
-function downloadTextFile(filename, content, mimeType = "text/plain;charset=utf-8") {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.download = filename;
-  link.href = url;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
@@ -355,100 +349,6 @@ async function copyText(text) {
     textarea.remove();
     return copied;
   }
-}
-
-function buildShareHtml() {
-  const colors = state.colors;
-  const contactLinks = [
-    state.phone ? `<a href="tel:${escapeAttr(state.phone.replace(/[^\d+]/g, ""))}">電話：${escapeHtml(state.phone)}</a>` : "",
-    state.lineId ? `<a href="https://line.me/R/ti/p/${encodeURIComponent(state.lineId)}">LINE：${escapeHtml(state.lineId)}</a>` : "",
-    state.website ? `<a href="${escapeAttr(makeLink(state.website))}" target="_blank" rel="noreferrer">網站</a>` : "",
-    state.social ? `<a href="${escapeAttr(makeLink(state.social))}" target="_blank" rel="noreferrer">社群</a>` : "",
-    state.email ? `<a href="mailto:${escapeAttr(state.email)}">Email：${escapeHtml(state.email)}</a>` : "",
-  ].filter(Boolean);
-
-  const caseCards = state.cases
-    .map((item, index) => {
-      const link = item.link
-        ? `<a class="case-link" href="${escapeAttr(makeLink(item.link))}" target="_blank" rel="noreferrer">打開連結</a>`
-        : "";
-      return `
-        <details class="case-card">
-          <summary>
-            <img src="${escapeAttr(item.image || placeholderCase)}" alt="">
-            <span>
-              <small>${escapeHtml(item.category || "案例")}</small>
-              <strong>${escapeHtml(item.title || `作品 / 菜單 ${index + 1}`)}</strong>
-            </span>
-          </summary>
-          <p>${escapeHtml(item.description || "尚未填寫詳細介紹。")}</p>
-          ${link}
-        </details>
-      `;
-    })
-    .join("");
-
-  return `<!doctype html>
-<html lang="zh-Hant">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escapeHtml(state.displayName || "LINE 數位名片")}</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; background: ${colors.pageBg}; color: ${colors.text}; font-family: system-ui, -apple-system, "Noto Sans TC", sans-serif; padding: 18px; }
-    .card { width: min(100%, 460px); margin: 0 auto; overflow: hidden; border: ${state.borderWidth}px solid ${colors.border}; border-radius: ${state.radius}px; background: ${colors.cardBg}; box-shadow: 0 22px 60px rgba(0,0,0,.16); }
-    .cover { height: 150px; background: ${colors.button}; background-image: ${state.cover ? `url("${state.cover}")` : "linear-gradient(135deg, rgba(6,199,85,.85), rgba(255,214,92,.7))"}; background-position: center; background-size: cover; }
-    .inner { padding: 0 20px 24px; }
-    .profile { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: end; margin-top: -48px; }
-    .avatar { width: 104px; height: 104px; overflow: hidden; border: 4px solid ${colors.cardBg}; background: ${colors.chipBg}; border-radius: ${state.avatarShape === "circle" ? "999px" : "8px"}; }
-    .avatar.full { grid-column: 1 / -1; width: 100%; height: 190px; }
-    .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    h1 { margin: 8px 0 4px; font-size: 1.7rem; line-height: 1.2; overflow-wrap: anywhere; }
-    .company { margin: 0; color: ${colors.accent}; font-weight: 800; }
-    .names, .bio, .products, .address { color: ${colors.muted}; line-height: 1.7; white-space: pre-line; overflow-wrap: anywhere; }
-    .actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 18px 0; }
-    .actions a, .case-link { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; background: ${colors.button}; color: ${colors.buttonText}; text-decoration: none; font-weight: 800; padding: 0 12px; }
-    .section { border-top: 1px solid ${colors.border}; padding-top: 16px; margin-top: 16px; }
-    .case-card { border: 1px solid ${colors.border}; border-radius: 8px; background: ${colors.caseBg}; margin: 10px 0; overflow: hidden; }
-    .case-card summary { display: grid; grid-template-columns: 82px 1fr; gap: 12px; align-items: center; padding: 10px; cursor: pointer; }
-    .case-card img { width: 82px; height: 72px; object-fit: cover; border-radius: 8px; }
-    .case-card small { color: ${colors.accent}; font-weight: 800; }
-    .case-card strong { display: block; overflow-wrap: anywhere; }
-    .case-card p { color: ${colors.muted}; padding: 0 12px; white-space: pre-line; line-height: 1.7; }
-    .case-link { margin: 0 12px 12px; }
-    @media (max-width: 520px) { body { padding: 10px; } .profile { grid-template-columns: 1fr; } .actions { grid-template-columns: 1fr; } }
-  </style>
-</head>
-<body>
-  <article class="card">
-    <div class="cover"></div>
-    <div class="inner">
-      <div class="profile">
-        <div class="avatar ${state.avatarShape === "full" ? "full" : ""}">
-          <img src="${escapeAttr(state.avatar || placeholderAvatar)}" alt="大頭貼">
-        </div>
-        <div>
-          <p class="company">${escapeHtml(state.company || "")}</p>
-          <h1>${escapeHtml(state.displayName || "LINE 數位名片")}</h1>
-          <p class="names">${escapeHtml([state.chineseName, state.englishName].filter(Boolean).join(" / "))}</p>
-        </div>
-      </div>
-      <p class="bio">${escapeHtml(state.bio || "")}</p>
-      <div class="section">
-        <h2>產品 / 服務</h2>
-        <p class="products">${escapeHtml(state.products || "")}</p>
-      </div>
-      <div class="actions">${contactLinks.join("")}</div>
-      ${state.address ? `<p class="address">${escapeHtml(state.address)}</p>` : ""}
-      <div class="section">
-        <h2>${escapeHtml(state.caseTitle || "作品案例 / 菜單")}</h2>
-        ${caseCards}
-      </div>
-    </div>
-  </article>
-</body>
-</html>`;
 }
 
 function renderThemeButtons() {
@@ -610,8 +510,11 @@ function render(shouldRenderEditors = false) {
   cover.style.backgroundImage = state.cover
     ? `linear-gradient(rgba(0,0,0,.06), rgba(0,0,0,.08)), url("${state.cover}")`
     : "";
+  cover.style.backgroundPosition = `${state.coverPosX}% ${state.coverPosY}%`;
 
-  document.querySelector("#previewAvatar").src = state.avatar || placeholderAvatar;
+  const previewAvatar = document.querySelector("#previewAvatar");
+  previewAvatar.src = state.avatar || placeholderAvatar;
+  previewAvatar.style.objectPosition = `${state.avatarPosX}% ${state.avatarPosY}%`;
   const avatarWrap = document.querySelector("#avatarWrap");
   avatarWrap.className = `avatar-wrap ${state.avatarShape} effect-${state.avatarEffect}`;
 
@@ -766,12 +669,6 @@ function attachEvents() {
     applyMode();
     syncInputs();
     render(true);
-  });
-
-  document.querySelector("#exportHtmlBtn").addEventListener("click", () => {
-    const filenameBase = (state.displayName || "line-digital-card").replace(/[\\/:*?"<>|]+/g, "-").trim();
-    downloadTextFile(`${filenameBase || "line-digital-card"}.html`, buildShareHtml(), "text/html;charset=utf-8");
-    showToast("已匯出可點擊的互動網頁");
   });
 
   document.querySelector("#downloadBtn").addEventListener("click", async () => {
