@@ -140,15 +140,37 @@ const toast = document.querySelector("#toast");
 const caseDialog = document.querySelector("#caseDialog");
 let isCardMode = hasSharedCard();
 
-function hasSharedCard() {
+function getCardParamFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-  return params.has("card") || hashParams.has("card");
+  const directCard = params.get("card") || hashParams.get("card");
+  if (directCard) return directCard;
+
+  const liffState = params.get("liff.state");
+  if (!liffState) return "";
+
+  const candidates = [
+    liffState,
+    liffState.replace(/^[?#]/, ""),
+    liffState.includes("?") ? liffState.slice(liffState.indexOf("?") + 1) : "",
+    liffState.includes("#") ? liffState.slice(liffState.indexOf("#") + 1) : "",
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const card = new URLSearchParams(candidate.replace(/^#/, "")).get("card");
+    if (card) return card;
+  }
+
+  return "";
+}
+
+function hasSharedCard() {
+  return Boolean(getCardParamFromUrl());
 }
 
 function loadState() {
   const params = new URLSearchParams(window.location.search);
-  if (params.get("fresh") === "1" && !params.has("card")) {
+  if (params.get("fresh") === "1" && !getCardParamFromUrl()) {
     localStorage.removeItem("lineCardState");
     window.history.replaceState({}, "", `${window.location.origin}${window.location.pathname}`);
   }
@@ -172,9 +194,7 @@ function loadState() {
 }
 
 function readStateFromUrl() {
-  const params = new URLSearchParams(window.location.search);
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-  const encoded = params.get("card") || hashParams.get("card");
+  const encoded = getCardParamFromUrl();
   if (!encoded) return null;
 
   try {
@@ -520,6 +540,10 @@ async function shareFlexCardToLine(url) {
 
   await window.liff.init({ liffId: LIFF_ID });
 
+  if (!window.liff.isInClient()) {
+    return "external";
+  }
+
   if (!window.liff.isLoggedIn()) {
     window.liff.login({ redirectUri: window.location.href });
     return "login";
@@ -860,6 +884,15 @@ function attachEvents() {
       const shareStatus = await shareFlexCardToLine(url);
       if (shareStatus === "shared") {
         showToast(`LINE 名片已送出${omittedImages ? "，上傳圖片會留在本機預覽" : ""}`);
+        return;
+      }
+      if (shareStatus === "external") {
+        const liffLink = `${LIFF_URL}?card=${encoded}`;
+        document.querySelector("#lineShareBtn").href = liffLink;
+        showToast("正在開啟 LINE，請在 LINE 裡再按一次送出名片");
+        window.setTimeout(() => {
+          window.location.href = liffLink;
+        }, 500);
         return;
       }
       if (shareStatus === "login") {
