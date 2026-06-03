@@ -1,9 +1,14 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const root = __dirname;
 const port = Number(process.env.PORT || 4173);
+const loginChannelId = process.env.LINE_LOGIN_CHANNEL_ID || "2010280088";
+const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
+const channelSecret = process.env.LINE_CHANNEL_SECRET || "";
+
 const types = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -14,31 +19,306 @@ const types = {
   ".svg": "image/svg+xml",
 };
 
-http
-  .createServer((req, res) => {
-    const urlPath = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
-    const normalized = path.normalize(urlPath).replace(/^(\.\.[\\/])+/, "");
-    const filePath = path.join(root, normalized === "/" ? "index.html" : normalized);
+function sendJson(res, status, body) {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type, X-Line-Signature",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  });
+  res.end(JSON.stringify(body));
+}
 
-    if (!filePath.startsWith(root)) {
-      res.writeHead(403);
-      res.end("Forbidden");
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+function verifyLineSignature(body, signature) {
+  if (!channelSecret || !signature) return false;
+  const expected = crypto.createHmac("sha256", channelSecret).update(body).digest("base64");
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+}
+
+function clampText(value, limit, fallback = "") {
+  const text = String(value || fallback || "").trim();
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit - 1)}…`;
+}
+
+function asFlexColor(value, fallback) {
+  return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? value : fallback;
+}
+
+function makeLink(url) {
+  const value = String(url || "").trim();
+  if (!value) return "";
+  if (/^(https?:|mailto:|tel:)/i.test(value)) return value;
+  return `https://${value}`;
+}
+
+function optionalButton(label, uri, options = {}) {
+  const href = makeLink(uri);
+  if (!href) return null;
+  return {
+    type: "button",
+    style: options.style || "link",
+    height: "sm",
+    action: {
+      type: "uri",
+      label: clampText(label, 20, "開啟連結"),
+      uri: href,
+    },
+  };
+}
+
+function makeLineProfileUrl(lineId) {
+  const value = String(lineId || "").trim();
+  if (!value) return "";
+  return `https://line.me/R/ti/p/${encodeURIComponent(value)}`;
+}
+
+function buildFlexBusinessCard(card, publicUrl) {
+  const colors = card.colors || {};
+  const bg = asFlexColor(colors.cardBg, "#ffffff");
+  const text = asFlexColor(colors.text, "#183128");
+  const muted = asFlexColor(colors.muted, "#64726d");
+  const accent = asFlexColor(colors.accent, "#19a866");
+  const button = asFlexColor(colors.button, "#06c755");
+  const chipBg = asFlexColor(colors.chipBg, "#e6f9ee");
+  const caseBg = asFlexColor(colors.caseBg, "#f6faf8");
+  const border = asFlexColor(colors.border, "#06c755");
+
+  const heroTexts = [
+    { type: "text", text: clampText(card.company, 44, "LINE 數位名片"), size: "xs", weight: "bold", color: accent, wrap: true },
+    { type: "text", text: clampText(card.displayName, 38, "我的 LINE 數位名片"), size: "xl", weight: "bold", color: text, wrap: true, margin: "sm" },
+  ];
+
+  const names = [card.chineseName, card.englishName].filter(Boolean).join(" / ");
+  if (names) heroTexts.push({ type: "text", text: clampText(names, 48), size: "sm", color: muted, wrap: true, margin: "sm" });
+  if (card.bio) heroTexts.push({ type: "text", text: clampText(card.bio, 180), size: "sm", color: text, wrap: true, margin: "md" });
+
+  const contents = [
+    {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: chipBg,
+      cornerRadius: "md",
+      paddingAll: "12px",
+      contents: heroTexts,
+    },
+  ];
+
+  if (card.products) {
+    contents.push({
+      type: "box",
+      layout: "vertical",
+      margin: "md",
+      backgroundColor: caseBg,
+      cornerRadius: "md",
+      paddingAll: "12px",
+      contents: [
+        { type: "text", text: "產品 / 服務", size: "xs", weight: "bold", color: accent },
+        { type: "text", text: clampText(card.products, 220), size: "sm", color: muted, wrap: true, margin: "xs" },
+      ],
+    });
+  }
+
+  const contactLines = [
+    card.phone ? `電話：${card.phone}` : "",
+    card.lineId ? `LINE：${card.lineId}` : "",
+    card.email ? `Email：${card.email}` : "",
+    card.address ? `地址：${card.address}` : "",
+  ].filter(Boolean);
+
+  if (contactLines.length) {
+    contents.push({
+      type: "box",
+      layout: "vertical",
+      margin: "md",
+      spacing: "xs",
+      contents: contactLines.slice(0, 4).map((line) => ({
+        type: "text",
+        text: clampText(line, 90),
+        size: "xs",
+        color: muted,
+        wrap: true,
+      })),
+    });
+  }
+
+  const caseButtons = (Array.isArray(card.cases) ? card.cases : [])
+    .filter((item) => String(item.title || item.link || "").trim() && String(item.link || "").trim())
+    .slice(0, 3)
+    .map((item, index) => optionalButton(item.title || `作品 ${index + 1}`, item.link))
+    .filter(Boolean);
+
+  const footerButtons = [
+    optionalButton("查看完整名片", publicUrl, { style: "primary" }),
+    optionalButton("撥打電話", card.phone ? `tel:${String(card.phone).replace(/[^\d+]/g, "")}` : ""),
+    optionalButton("加 LINE", makeLineProfileUrl(card.lineId)),
+    optionalButton("官方網站", card.website),
+    optionalButton("社群連結", card.social),
+    ...caseButtons,
+  ].filter(Boolean);
+
+  if (footerButtons[0]) footerButtons[0].color = button;
+
+  return {
+    type: "flex",
+    altText: clampText(`${card.displayName || "我的"} LINE 數位名片`, 400),
+    contents: {
+      type: "bubble",
+      size: "mega",
+      body: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: bg,
+        paddingAll: "18px",
+        contents,
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        backgroundColor: bg,
+        contents: footerButtons.length
+          ? footerButtons
+          : [{ type: "text", text: "請在名片中加入至少一個可點擊連結", size: "sm", color: muted, wrap: true }],
+      },
+      styles: { footer: { separator: true, separatorColor: border } },
+    },
+  };
+}
+
+async function verifyIdToken(idToken) {
+  const params = new URLSearchParams({ id_token: idToken, client_id: loginChannelId });
+  const response = await fetch("https://api.line.me/oauth2/v2.1/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params,
+  });
+  if (!response.ok) throw new Error("LINE 授權驗證失敗");
+  return response.json();
+}
+
+async function pushMessage(userId, message) {
+  if (!channelAccessToken) throw new Error("後端尚未設定 LINE_CHANNEL_ACCESS_TOKEN");
+  const response = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${channelAccessToken}`,
+    },
+    body: JSON.stringify({ to: userId, messages: [message] }),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`官方帳號發送失敗：${detail || response.status}`);
+  }
+}
+
+async function replyMessage(replyToken, messages) {
+  if (!channelAccessToken || !replyToken) return;
+  await fetch("https://api.line.me/v2/bot/message/reply", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${channelAccessToken}`,
+    },
+    body: JSON.stringify({ replyToken, messages }),
+  });
+}
+
+async function handleSendCard(req, res) {
+  try {
+    const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+    if (!body.idToken || !body.card) {
+      sendJson(res, 400, { error: "missing_payload", message: "缺少 LINE 授權或名片資料" });
+      return;
+    }
+    const profile = await verifyIdToken(body.idToken);
+    const message = buildFlexBusinessCard(body.card, body.publicUrl);
+    await pushMessage(profile.sub, message);
+    sendJson(res, 200, { ok: true });
+  } catch (error) {
+    sendJson(res, 500, { error: "send_failed", message: error.message || "官方帳號發送失敗" });
+  }
+}
+
+async function handleWebhook(req, res) {
+  const body = await readBody(req);
+  if (!verifyLineSignature(body, req.headers["x-line-signature"])) {
+    sendJson(res, 401, { error: "invalid_signature" });
+    return;
+  }
+
+  const payload = JSON.parse(body.toString("utf8") || "{}");
+  for (const event of payload.events || []) {
+    if (event.type === "follow") {
+      await replyMessage(event.replyToken, [
+        {
+          type: "text",
+          text: "歡迎加入！請回到 LINE 數位名片頁，按「官方帳號發送」，我就會把你剛設計好的名片發到這裡。",
+        },
+      ]);
+    }
+  }
+  sendJson(res, 200, { ok: true });
+}
+
+function serveStatic(req, res) {
+  const urlPath = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
+  const normalized = path.normalize(urlPath).replace(/^(\.\.[\\/])+/, "");
+  const filePath = path.join(root, normalized === "/" ? "index.html" : normalized);
+
+  if (!filePath.startsWith(root)) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+
+  fs.readFile(filePath, (error, data) => {
+    if (error) {
+      res.writeHead(404);
+      res.end("Not found");
       return;
     }
 
-    fs.readFile(filePath, (error, data) => {
-      if (error) {
-        res.writeHead(404);
-        res.end("Not found");
-        return;
-      }
-
-      res.writeHead(200, {
-        "Content-Type": types[path.extname(filePath).toLowerCase()] || "application/octet-stream",
-      });
-      res.end(data);
+    res.writeHead(200, {
+      "Content-Type": types[path.extname(filePath).toLowerCase()] || "application/octet-stream",
     });
+    res.end(data);
+  });
+}
+
+http
+  .createServer(async (req, res) => {
+    if (req.method === "OPTIONS") {
+      sendJson(res, 204, {});
+      return;
+    }
+
+    const pathname = new URL(req.url, "http://localhost").pathname;
+    if (req.method === "GET" && pathname === "/health") {
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/send-card") {
+      await handleSendCard(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/webhook") {
+      await handleWebhook(req, res);
+      return;
+    }
+
+    serveStatic(req, res);
   })
-  .listen(port, "127.0.0.1", () => {
+  .listen(port, "0.0.0.0", () => {
     console.log(`LINE card generator running at http://127.0.0.1:${port}`);
   });

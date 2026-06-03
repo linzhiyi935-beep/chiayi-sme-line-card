@@ -26,6 +26,7 @@ const placeholderCase =
 const PUBLIC_SITE_URL = "https://linzhiyi935-beep.github.io/chiayi-sme-line-card/";
 const LIFF_ID = "2010280088-IG7ReTtB";
 const LIFF_URL = `https://liff.line.me/${LIFF_ID}`;
+const BOT_API_BASE = window.LINE_BOT_API_BASE || "";
 
 const themes = [
   {
@@ -557,6 +558,51 @@ async function shareFlexCardToLine(url) {
   return result ? "shared" : "cancelled";
 }
 
+async function sendCardByOfficialAccount(url, encoded) {
+  if (!window.liff || !LIFF_ID) return "unavailable";
+
+  await window.liff.init({ liffId: LIFF_ID });
+
+  if (!window.liff.isInClient()) {
+    window.location.href = `${LIFF_URL}?card=${encoded}`;
+    return "external";
+  }
+
+  if (!window.liff.isLoggedIn()) {
+    window.liff.login({ redirectUri: window.location.href });
+    return "login";
+  }
+
+  if (typeof window.liff.requestFriendship === "function") {
+    try {
+      await window.liff.requestFriendship();
+    } catch (error) {
+      console.warn("LINE friendship request failed", error);
+    }
+  }
+
+  const idToken = window.liff.getIDToken();
+  if (!idToken) return "no-token";
+
+  const response = await fetch(`${BOT_API_BASE}/api/send-card`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      idToken,
+      publicUrl: url,
+      card: getPortableState().portable,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data.message || data.error || "官方帳號後端尚未完成設定";
+    throw new Error(message);
+  }
+
+  return "sent";
+}
+
 function preparePublicShare() {
   const { url, encoded, omittedImages } = makePublicCardUrl();
   state.publicCardUrl = url;
@@ -913,6 +959,32 @@ function attachEvents() {
     window.setTimeout(() => {
       window.location.href = liffLink;
     }, 500);
+  });
+
+  document.querySelector("#officialSendBtn").addEventListener("click", async () => {
+    const { url, encoded, omittedImages } = preparePublicShare();
+    try {
+      const status = await sendCardByOfficialAccount(url, encoded);
+      if (status === "sent") {
+        showToast(`官方帳號已發送名片${omittedImages ? "，上傳圖片會留在本機預覽" : ""}`);
+        return;
+      }
+      if (status === "external") {
+        showToast("正在開啟 LINE，請在 LINE 裡再按一次官方帳號發送");
+        return;
+      }
+      if (status === "login") {
+        showToast("正在前往 LINE 授權，完成後再按一次官方帳號發送");
+        return;
+      }
+      if (status === "no-token") {
+        showToast("LINE 授權尚未完成，請重新開啟 LIFF 後再試一次");
+        return;
+      }
+    } catch (error) {
+      console.warn("Official account send failed", error);
+      showToast(error.message || "官方帳號發送失敗，請確認後端與 LINE 設定");
+    }
   });
 
   document.querySelector("#publicLinkBtn").addEventListener("click", async () => {
