@@ -108,7 +108,6 @@ function imageBox(url, options = {}) {
     aspectMode: "cover",
     gravity: "center",
     margin: options.margin || "none",
-    cornerRadius: options.cornerRadius,
   };
 }
 
@@ -135,14 +134,12 @@ function buildFlexBusinessCard(card, publicUrl) {
   const avatarImage = imageBox(card.avatar, {
     size: "md",
     aspectRatio: "1:1",
-    cornerRadius: card.avatarShape === "square" ? "md" : "100px",
   });
 
   const contents = [
     card.cover
       ? imageBox(card.cover, {
           aspectRatio: "20:9",
-          cornerRadius: "md",
         })
       : null,
     {
