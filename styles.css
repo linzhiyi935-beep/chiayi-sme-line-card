@@ -11,11 +11,7 @@
 }
 
 #lineShareBtn,
-#viewLineShareBtn,
-#publicLinkBtn,
-#downloadBtn,
-#copyShareBtn,
-.share-note {
+#viewLineShareBtn {
   display: none !important;
 }
 
