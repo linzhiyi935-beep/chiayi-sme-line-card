@@ -573,18 +573,26 @@ async function sendCardByOfficialAccount(url, encoded) {
     return "login";
   }
 
+  let canCheckFriendship = true;
   if (typeof window.liff.getFriendship === "function") {
-    const friendship = await window.liff.getFriendship();
-    if (!friendship.friendFlag) {
-      if (typeof window.liff.requestFriendship !== "function") {
-        return "not-friend";
+    try {
+      const friendship = await window.liff.getFriendship();
+      if (!friendship.friendFlag) {
+        if (typeof window.liff.requestFriendship !== "function") {
+          return "not-friend";
+        }
+        await window.liff.requestFriendship();
+        await new Promise((resolve) => window.setTimeout(resolve, 900));
+        const updatedFriendship = await window.liff.getFriendship();
+        if (!updatedFriendship.friendFlag) return "not-friend";
       }
-      await window.liff.requestFriendship();
-      await new Promise((resolve) => window.setTimeout(resolve, 900));
-      const updatedFriendship = await window.liff.getFriendship();
-      if (!updatedFriendship.friendFlag) return "not-friend";
+    } catch (error) {
+      console.warn("LINE friendship check failed", error);
+      canCheckFriendship = false;
     }
-  } else if (typeof window.liff.requestFriendship === "function") {
+  }
+
+  if (!canCheckFriendship && typeof window.liff.requestFriendship === "function") {
     try {
       await window.liff.requestFriendship();
     } catch (error) {
