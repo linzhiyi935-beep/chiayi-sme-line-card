@@ -64,6 +64,7 @@ function makeLink(url) {
 function optionalButton(label, uri, options = {}) {
   const href = makeLink(uri);
   if (!href) return null;
+  if (href.length > 1000) return null;
   return {
     type: "button",
     style: options.style || "link",
@@ -216,7 +217,8 @@ function buildFlexBusinessCard(card, publicUrl) {
     ...caseButtons,
   ].filter(Boolean);
 
-  if (footerButtons[0]) footerButtons[0].color = button;
+  const primaryFooterButton = footerButtons.find((item) => item.style === "primary");
+  if (primaryFooterButton) primaryFooterButton.color = button;
 
   return {
     type: "flex",

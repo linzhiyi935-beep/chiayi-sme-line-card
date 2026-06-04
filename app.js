@@ -370,6 +370,7 @@ function optionalText(text, options = {}) {
 function optionalButton(label, uri, options = {}) {
   const href = makeLink(uri);
   if (!uri || href === "#") return null;
+  if (href.length > 1000) return null;
   return {
     type: "button",
     style: options.style || "link",
@@ -491,9 +492,10 @@ function buildFlexBusinessCard(publicUrl) {
     ...caseButtons,
   ].filter(Boolean);
 
-  if (footerButtons[0]) {
-    footerButtons[0].color = button;
-    footerButtons[0].action.label = "查看完整名片";
+  const primaryFooterButton = footerButtons.find((item) => item.style === "primary");
+  if (primaryFooterButton) {
+    primaryFooterButton.color = button;
+    primaryFooterButton.action.label = "查看完整名片";
   }
 
   return {
