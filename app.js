@@ -141,11 +141,11 @@ const toast = document.querySelector("#toast");
 const caseDialog = document.querySelector("#caseDialog");
 let isCardMode = hasSharedCard();
 
-function getCardParamFromUrl() {
+function getParamFromUrl(name) {
   const params = new URLSearchParams(window.location.search);
   const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-  const directCard = params.get("card") || hashParams.get("card");
-  if (directCard) return directCard;
+  const directValue = params.get(name) || hashParams.get(name);
+  if (directValue) return directValue;
 
   const liffState = params.get("liff.state");
   if (!liffState) return "";
@@ -158,11 +158,15 @@ function getCardParamFromUrl() {
   ].filter(Boolean);
 
   for (const candidate of candidates) {
-    const card = new URLSearchParams(candidate.replace(/^#/, "")).get("card");
-    if (card) return card;
+    const value = new URLSearchParams(candidate.replace(/^#/, "")).get(name);
+    if (value) return value;
   }
 
   return "";
+}
+
+function getCardParamFromUrl() {
+  return getParamFromUrl("card");
 }
 
 function hasSharedCard() {
@@ -266,6 +270,40 @@ function loadSharedCardFromCurrentUrl() {
   syncInputs();
   render(true);
   return true;
+}
+
+async function loadSavedCardFromCurrentUrl() {
+  const cardId = getParamFromUrl("cardId");
+  if (!cardId) return false;
+
+  try {
+    const response = await fetch(`${BOT_API_BASE}/api/cards/${encodeURIComponent(cardId)}`);
+    const data = await response.json();
+    if (!response.ok || !data.card) throw new Error(data.message || data.error || "card not found");
+
+    state = {
+      ...structuredClone(defaultState),
+      ...data.card,
+      colors: { ...defaultState.colors, ...(data.card.colors || {}) },
+      cases: Array.isArray(data.card.cases) ? data.card.cases : structuredClone(defaultState.cases),
+    };
+    isCardMode = true;
+    applyMode();
+    syncInputs();
+    render(true);
+
+    if (getParamFromUrl("share") === "1") {
+      window.setTimeout(() => {
+        handleLineShareClick(new Event("click"));
+      }, 700);
+    }
+
+    return true;
+  } catch (error) {
+    console.warn("Saved card load failed", error);
+    showToast("名片資料讀取失敗，請重新產生名片");
+    return false;
+  }
 }
 
 function makeLink(url) {
@@ -394,6 +432,23 @@ function makeLineProfileUrl(lineId) {
   return `https://line.me/R/ti/p/${encodeURIComponent(value)}`;
 }
 
+function isPublicImageUrl(value) {
+  return /^https:\/\/.+/i.test(String(value || "").trim());
+}
+
+function flexImageBox(url, options = {}) {
+  if (!isPublicImageUrl(url)) return null;
+  return {
+    type: "image",
+    url,
+    size: options.size || "full",
+    aspectRatio: options.aspectRatio || "16:9",
+    aspectMode: "cover",
+    gravity: "center",
+    margin: options.margin || "none",
+  };
+}
+
 function buildFlexBusinessCard(publicUrl) {
   const bg = asFlexColor(state.colors.cardBg, "#ffffff");
   const text = asFlexColor(state.colors.text, "#183128");
@@ -446,16 +501,37 @@ function buildFlexBusinessCard(publicUrl) {
     }),
   ].filter(Boolean);
 
+  const avatarImage = flexImageBox(state.avatar, {
+    size: "md",
+    aspectRatio: "1:1",
+  });
+
   const contents = [
+    state.cover
+      ? flexImageBox(state.cover, {
+          aspectRatio: "20:9",
+        })
+      : null,
     {
       type: "box",
-      layout: "vertical",
+      layout: avatarImage ? "horizontal" : "vertical",
       backgroundColor: chipBg,
       cornerRadius: "md",
       paddingAll: "12px",
-      contents: heroTexts,
+      margin: state.cover ? "md" : "none",
+      contents: avatarImage
+        ? [
+            avatarImage,
+            {
+              type: "box",
+              layout: "vertical",
+              margin: "md",
+              contents: heroTexts,
+            },
+          ]
+        : heroTexts,
     },
-  ];
+  ].filter(Boolean);
 
   if (productText) {
     contents.push({
@@ -638,6 +714,19 @@ async function buildOfficialCardWithImages() {
   };
 }
 
+async function saveOfficialCard(card) {
+  const response = await fetch(`${BOT_API_BASE}/api/cards`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ card }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.id) {
+    throw new Error(data.message || data.error || "名片短連結建立失敗");
+  }
+  return `${LIFF_URL}?cardId=${encodeURIComponent(data.id)}`;
+}
+
 async function sendCardByOfficialAccount(url, encoded) {
   if (!window.liff || !LIFF_ID) return "unavailable";
 
@@ -684,13 +773,19 @@ async function sendCardByOfficialAccount(url, encoded) {
   if (!idToken) return "no-token";
 
   const officialCard = await buildOfficialCardWithImages();
+  let officialPublicUrl = url;
+  try {
+    officialPublicUrl = await saveOfficialCard(officialCard.card);
+  } catch (error) {
+    console.warn("Saved card URL failed", error);
+  }
 
   const response = await fetch(`${BOT_API_BASE}/api/send-card`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       idToken,
-      publicUrl: url,
+      publicUrl: officialPublicUrl,
       card: officialCard.card,
     }),
   });
@@ -707,7 +802,11 @@ async function sendCardByOfficialAccount(url, encoded) {
 async function handleLineShareClick(event, trigger) {
   event?.preventDefault();
   showToast("正在準備 LINE 名片");
-  const { url, encoded, omittedImages } = preparePublicShare();
+  let { url, encoded, omittedImages } = preparePublicShare();
+  const cardId = getParamFromUrl("cardId");
+  if (cardId) {
+    url = `${LIFF_URL}?cardId=${encodeURIComponent(cardId)}`;
+  }
   const copied = await copyText(url);
   try {
     const shareStatus = await shareFlexCardToLine(url);
@@ -716,7 +815,7 @@ async function handleLineShareClick(event, trigger) {
       return;
     }
     if (shareStatus === "external") {
-      const liffLink = `${LIFF_URL}?card=${encoded}`;
+      const liffLink = cardId ? `${LIFF_URL}?cardId=${encodeURIComponent(cardId)}&share=1` : `${LIFF_URL}?card=${encoded}`;
       if (trigger) trigger.href = liffLink;
       showToast("正在開啟 LINE，請在 LINE 裡再按一次送出名片");
       window.setTimeout(() => {
@@ -736,7 +835,7 @@ async function handleLineShareClick(event, trigger) {
     console.warn("LINE LIFF share failed", error);
   }
 
-  const liffLink = `${LIFF_URL}?card=${encoded}`;
+  const liffLink = cardId ? `${LIFF_URL}?cardId=${encodeURIComponent(cardId)}&share=1` : `${LIFF_URL}?card=${encoded}`;
   if (trigger) trigger.href = liffLink;
   showToast(copied ? "請用手機 LINE 開啟本頁或 LIFF 連結；公開名片連結已先複製" : "請用手機 LINE 開啟本頁或 LIFF 連結");
   window.setTimeout(() => {
@@ -1181,3 +1280,4 @@ syncInputs();
 attachEvents();
 applyMode();
 render(true);
+loadSavedCardFromCurrentUrl();

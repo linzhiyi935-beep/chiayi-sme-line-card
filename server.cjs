@@ -10,6 +10,7 @@ const loginChannelId = process.env.LINE_LOGIN_CHANNEL_ID || "2010280088";
 const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
 const channelSecret = process.env.LINE_CHANNEL_SECRET || "";
 const uploadDir = path.join(os.tmpdir(), "line-card-images");
+const cardDir = path.join(os.tmpdir(), "line-card-states");
 
 const types = {
   ".html": "text/html; charset=utf-8",
@@ -70,6 +71,12 @@ function makeLink(url) {
   if (!value) return "";
   if (/^(https?:|mailto:|tel:)/i.test(value)) return value;
   return `https://${value}`;
+}
+
+function addUrlParam(url, key, value) {
+  if (!url) return "";
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
 }
 
 function optionalButton(label, uri, options = {}) {
@@ -258,6 +265,7 @@ function buildFlexBusinessCard(card, publicUrl) {
     .filter(Boolean);
 
   const footerButtons = [
+    optionalButton("分享給好友", addUrlParam(publicUrl, "share", "1")),
     optionalButton("開啟互動名片", publicUrl, { style: "primary" }),
     optionalButton("撥打電話", card.phone ? `tel:${String(card.phone).replace(/[^\d+]/g, "")}` : ""),
     optionalButton("加 LINE", makeLineProfileUrl(card.lineId)),
@@ -357,6 +365,49 @@ async function handleUploadImages(req, res) {
     sendJson(res, 200, { uploads });
   } catch (error) {
     sendJson(res, 500, { error: "upload_failed", message: error.message || "image upload failed" });
+  }
+}
+
+async function handleSaveCard(req, res) {
+  try {
+    const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+    if (!body.card) {
+      sendJson(res, 400, { error: "missing_card", message: "missing card" });
+      return;
+    }
+
+    await fs.promises.mkdir(cardDir, { recursive: true });
+    const id = crypto.randomBytes(8).toString("hex");
+    const payload = {
+      createdAt: new Date().toISOString(),
+      card: body.card,
+    };
+    await fs.promises.writeFile(path.join(cardDir, `${id}.json`), JSON.stringify(payload), "utf8");
+    sendJson(res, 200, { id, url: `${getRequestBaseUrl(req)}/?cardId=${id}` });
+  } catch (error) {
+    sendJson(res, 500, { error: "save_card_failed", message: error.message || "save card failed" });
+  }
+}
+
+async function handleGetCard(req, res, id) {
+  try {
+    const safeId = String(id || "").replace(/[^a-f0-9]/gi, "");
+    if (!safeId) {
+      sendJson(res, 400, { error: "missing_card_id" });
+      return;
+    }
+
+    const filePath = path.join(cardDir, `${safeId}.json`);
+    if (!filePath.startsWith(cardDir)) {
+      sendJson(res, 403, { error: "forbidden" });
+      return;
+    }
+
+    const raw = await fs.promises.readFile(filePath, "utf8");
+    const payload = JSON.parse(raw);
+    sendJson(res, 200, { card: payload.card, createdAt: payload.createdAt });
+  } catch {
+    sendJson(res, 404, { error: "card_not_found", message: "card not found" });
   }
 }
 
@@ -479,6 +530,14 @@ http
     }
     if (req.method === "POST" && cleanPath === "/api/upload-images") {
       await handleUploadImages(req, res);
+      return;
+    }
+    if (req.method === "POST" && cleanPath === "/api/cards") {
+      await handleSaveCard(req, res);
+      return;
+    }
+    if (req.method === "GET" && cleanPath.startsWith("/api/cards/")) {
+      await handleGetCard(req, res, cleanPath.split("/").pop());
       return;
     }
     if (req.method === "POST" && cleanPath === "/webhook") {
