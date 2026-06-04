@@ -229,7 +229,12 @@ function decodeBase64Url(text) {
 }
 
 function persist() {
-  localStorage.setItem("lineCardState", JSON.stringify(state));
+  try {
+    localStorage.setItem("lineCardState", JSON.stringify(state));
+  } catch (error) {
+    console.warn("Local save failed", error);
+    showToast("圖片較大，已保留在目前畫面；若重開頁面請重新上傳圖片");
+  }
   saveStatus.textContent = "已自動保存";
   window.clearTimeout(persist.timer);
   persist.timer = window.setTimeout(() => {
@@ -701,6 +706,7 @@ async function sendCardByOfficialAccount(url, encoded) {
 
 async function handleLineShareClick(event, trigger) {
   event?.preventDefault();
+  showToast("正在準備 LINE 名片");
   const { url, encoded, omittedImages } = preparePublicShare();
   const copied = await copyText(url);
   try {
@@ -739,11 +745,12 @@ async function handleLineShareClick(event, trigger) {
 }
 
 async function handleOfficialSendClick() {
-  const { url, encoded, omittedImages } = preparePublicShare();
+  showToast("正在處理圖片並發送名片");
+  const { url, encoded } = preparePublicShare();
   try {
     const status = await sendCardByOfficialAccount(url, encoded);
     if (status === "sent") {
-      showToast(`官方帳號已發送完整名片${omittedImages ? "，上傳圖片會留在本機預覽" : ""}`);
+      showToast("官方帳號已發送完整名片");
       return;
     }
     if (status === "external") {
@@ -988,6 +995,14 @@ function fileToDataUrl(file) {
   });
 }
 
+async function fileToOptimizedDataUrl(file, options = {}) {
+  const maxWidth = options.maxWidth || 1200;
+  const maxHeight = options.maxHeight || 1200;
+  const dataUrl = await fileToDataUrl(file);
+  if (!file.type.startsWith("image/")) return dataUrl;
+  return resizeDataImage(dataUrl, maxWidth, maxHeight);
+}
+
 function attachEvents() {
   document.querySelectorAll("[data-field]").forEach((input) => {
     input.addEventListener("input", () => {
@@ -1018,17 +1033,31 @@ function attachEvents() {
   document.querySelector("#avatarUpload").addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    state.avatar = await fileToDataUrl(file);
-    render(false);
-    persist();
+    try {
+      showToast("正在處理大頭貼圖片");
+      state.avatar = await fileToOptimizedDataUrl(file, { maxWidth: 800, maxHeight: 800 });
+      render(false);
+      persist();
+      showToast("大頭貼已上傳");
+    } catch (error) {
+      console.warn("Avatar upload failed", error);
+      showToast("大頭貼處理失敗，請換一張較小的圖片");
+    }
   });
 
   document.querySelector("#coverUpload").addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    state.cover = await fileToDataUrl(file);
-    render(false);
-    persist();
+    try {
+      showToast("正在處理封面圖片");
+      state.cover = await fileToOptimizedDataUrl(file, { maxWidth: 1400, maxHeight: 800 });
+      render(false);
+      persist();
+      showToast("封面圖片已上傳");
+    } catch (error) {
+      console.warn("Cover upload failed", error);
+      showToast("封面圖片處理失敗，請換一張較小的圖片");
+    }
   });
 
   document.querySelector("#addCaseBtn").addEventListener("click", () => {
@@ -1068,9 +1097,16 @@ function attachEvents() {
     const file = upload.files?.[0];
     if (!file) return;
     const index = Number(upload.dataset.caseUpload);
-    state.cases[index].image = await fileToDataUrl(file);
-    render(false);
-    persist();
+    try {
+      showToast("正在處理案例圖片");
+      state.cases[index].image = await fileToOptimizedDataUrl(file, { maxWidth: 1200, maxHeight: 900 });
+      render(false);
+      persist();
+      showToast("案例圖片已上傳");
+    } catch (error) {
+      console.warn("Case image upload failed", error);
+      showToast("案例圖片處理失敗，請換一張較小的圖片");
+    }
   });
 
   document.querySelector("#resetBtn").addEventListener("click", () => {
