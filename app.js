@@ -261,6 +261,7 @@ function safeValue(value, fallback = "尚未填寫") {
 function applyMode() {
   document.body.classList.toggle("view-mode", isCardMode);
   document.body.classList.toggle("share-mode", Boolean(getParamFromUrl("cardId")));
+  if (getParamFromUrl("cardId")) updateShareModeActions();
 }
 
 function loadSharedCardFromCurrentUrl() {
