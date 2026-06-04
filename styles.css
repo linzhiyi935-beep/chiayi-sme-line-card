@@ -15,6 +15,10 @@
   display: none !important;
 }
 
+body.share-mode #viewLineShareBtn {
+  display: inline-flex !important;
+}
+
 * {
   box-sizing: border-box;
 }

@@ -259,6 +259,7 @@ function safeValue(value, fallback = "尚未填寫") {
 
 function applyMode() {
   document.body.classList.toggle("view-mode", isCardMode);
+  document.body.classList.toggle("share-mode", getParamFromUrl("share") === "1");
 }
 
 function loadSharedCardFromCurrentUrl() {
@@ -270,6 +271,12 @@ function loadSharedCardFromCurrentUrl() {
   syncInputs();
   render(true);
   return true;
+}
+
+function updateShareModeActions() {
+  const viewShareButton = document.querySelector("#viewLineShareBtn");
+  if (!viewShareButton) return;
+  viewShareButton.innerHTML = `<i data-lucide="send"></i>分享給好友`;
 }
 
 async function loadSavedCardFromCurrentUrl() {
@@ -289,14 +296,11 @@ async function loadSavedCardFromCurrentUrl() {
     };
     isCardMode = true;
     applyMode();
+    updateShareModeActions();
     syncInputs();
     render(true);
 
-    if (getParamFromUrl("share") === "1") {
-      window.setTimeout(() => {
-        handleLineShareClick(new Event("click"));
-      }, 700);
-    }
+    if (getParamFromUrl("share") === "1") showToast("請按分享給好友，選擇要傳送的 LINE 好友");
 
     return true;
   } catch (error) {
@@ -815,7 +819,7 @@ async function handleLineShareClick(event, trigger) {
       return;
     }
     if (shareStatus === "external") {
-      const liffLink = cardId ? `${LIFF_URL}?cardId=${encodeURIComponent(cardId)}&share=1` : `${LIFF_URL}?card=${encoded}`;
+      const liffLink = cardId ? `${LIFF_URL}?cardId=${encodeURIComponent(cardId)}` : `${LIFF_URL}?card=${encoded}`;
       if (trigger) trigger.href = liffLink;
       showToast("正在開啟 LINE，請在 LINE 裡再按一次送出名片");
       window.setTimeout(() => {
@@ -835,7 +839,7 @@ async function handleLineShareClick(event, trigger) {
     console.warn("LINE LIFF share failed", error);
   }
 
-  const liffLink = cardId ? `${LIFF_URL}?cardId=${encodeURIComponent(cardId)}&share=1` : `${LIFF_URL}?card=${encoded}`;
+  const liffLink = cardId ? `${LIFF_URL}?cardId=${encodeURIComponent(cardId)}` : `${LIFF_URL}?card=${encoded}`;
   if (trigger) trigger.href = liffLink;
   showToast(copied ? "請用手機 LINE 開啟本頁或 LIFF 連結；公開名片連結已先複製" : "請用手機 LINE 開啟本頁或 LIFF 連結");
   window.setTimeout(() => {
