@@ -573,7 +573,18 @@ async function sendCardByOfficialAccount(url, encoded) {
     return "login";
   }
 
-  if (typeof window.liff.requestFriendship === "function") {
+  if (typeof window.liff.getFriendship === "function") {
+    const friendship = await window.liff.getFriendship();
+    if (!friendship.friendFlag) {
+      if (typeof window.liff.requestFriendship !== "function") {
+        return "not-friend";
+      }
+      await window.liff.requestFriendship();
+      await new Promise((resolve) => window.setTimeout(resolve, 900));
+      const updatedFriendship = await window.liff.getFriendship();
+      if (!updatedFriendship.friendFlag) return "not-friend";
+    }
+  } else if (typeof window.liff.requestFriendship === "function") {
     try {
       await window.liff.requestFriendship();
     } catch (error) {
@@ -601,6 +612,75 @@ async function sendCardByOfficialAccount(url, encoded) {
   }
 
   return "sent";
+}
+
+async function handleLineShareClick(event, trigger) {
+  event?.preventDefault();
+  const { url, encoded, omittedImages } = preparePublicShare();
+  const copied = await copyText(url);
+  try {
+    const shareStatus = await shareFlexCardToLine(url);
+    if (shareStatus === "shared") {
+      showToast(`LINE 名片已送出${omittedImages ? "，上傳圖片會留在本機預覽" : ""}`);
+      return;
+    }
+    if (shareStatus === "external") {
+      const liffLink = `${LIFF_URL}?card=${encoded}`;
+      if (trigger) trigger.href = liffLink;
+      showToast("正在開啟 LINE，請在 LINE 裡再按一次送出名片");
+      window.setTimeout(() => {
+        window.location.href = liffLink;
+      }, 500);
+      return;
+    }
+    if (shareStatus === "login") {
+      showToast("正在前往 LINE 登入授權，完成後再按一次送出名片");
+      return;
+    }
+    if (shareStatus === "cancelled") {
+      showToast("已取消 LINE 分享");
+      return;
+    }
+  } catch (error) {
+    console.warn("LINE LIFF share failed", error);
+  }
+
+  const liffLink = `${LIFF_URL}?card=${encoded}`;
+  if (trigger) trigger.href = liffLink;
+  showToast(copied ? "請用手機 LINE 開啟本頁或 LIFF 連結；公開名片連結已先複製" : "請用手機 LINE 開啟本頁或 LIFF 連結");
+  window.setTimeout(() => {
+    window.location.href = liffLink;
+  }, 500);
+}
+
+async function handleOfficialSendClick() {
+  const { url, encoded, omittedImages } = preparePublicShare();
+  try {
+    const status = await sendCardByOfficialAccount(url, encoded);
+    if (status === "sent") {
+      showToast(`官方帳號已發送完整名片${omittedImages ? "，上傳圖片會留在本機預覽" : ""}`);
+      return;
+    }
+    if (status === "external") {
+      showToast("正在開啟 LINE，請在 LINE 裡再按一次官方帳號發送");
+      return;
+    }
+    if (status === "login") {
+      showToast("正在前往 LINE 授權，完成後再按一次官方帳號發送");
+      return;
+    }
+    if (status === "not-friend") {
+      showToast("請先加入官方帳號好友，再按一次官方帳號發送");
+      return;
+    }
+    if (status === "no-token") {
+      showToast("LINE 授權尚未完成，請重新開啟 LIFF 後再試一次");
+      return;
+    }
+  } catch (error) {
+    console.warn("Official account send failed", error);
+    showToast(error.message || "官方帳號發送失敗，請確認已加入官方帳號");
+  }
 }
 
 function preparePublicShare() {
@@ -922,70 +1002,16 @@ function attachEvents() {
     showToast(copied ? `可點擊分享文字已複製${omittedImages ? "，部分大圖未放入連結" : ""}` : "無法自動複製，請改用分享 LINE");
   });
 
-  document.querySelector("#lineShareBtn").addEventListener("click", async (event) => {
-    event.preventDefault();
-    const { url, encoded, omittedImages } = preparePublicShare();
-    const copied = await copyText(url);
-    try {
-      const shareStatus = await shareFlexCardToLine(url);
-      if (shareStatus === "shared") {
-        showToast(`LINE 名片已送出${omittedImages ? "，上傳圖片會留在本機預覽" : ""}`);
-        return;
-      }
-      if (shareStatus === "external") {
-        const liffLink = `${LIFF_URL}?card=${encoded}`;
-        document.querySelector("#lineShareBtn").href = liffLink;
-        showToast("正在開啟 LINE，請在 LINE 裡再按一次送出名片");
-        window.setTimeout(() => {
-          window.location.href = liffLink;
-        }, 500);
-        return;
-      }
-      if (shareStatus === "login") {
-        showToast("正在前往 LINE 登入授權，完成後再按一次送出名片");
-        return;
-      }
-      if (shareStatus === "cancelled") {
-        showToast("已取消 LINE 分享");
-        return;
-      }
-    } catch (error) {
-      console.warn("LINE LIFF share failed", error);
-    }
-
-    const liffLink = `${LIFF_URL}?card=${encoded}`;
-    document.querySelector("#lineShareBtn").href = liffLink;
-    showToast(copied ? "請用手機 LINE 開啟本頁或 LIFF 連結；公開名片連結已先複製" : "請用手機 LINE 開啟本頁或 LIFF 連結");
-    window.setTimeout(() => {
-      window.location.href = liffLink;
-    }, 500);
+  document.querySelector("#lineShareBtn").addEventListener("click", (event) => {
+    handleLineShareClick(event, event.currentTarget);
   });
 
-  document.querySelector("#officialSendBtn").addEventListener("click", async () => {
-    const { url, encoded, omittedImages } = preparePublicShare();
-    try {
-      const status = await sendCardByOfficialAccount(url, encoded);
-      if (status === "sent") {
-        showToast(`官方帳號已發送名片${omittedImages ? "，上傳圖片會留在本機預覽" : ""}`);
-        return;
-      }
-      if (status === "external") {
-        showToast("正在開啟 LINE，請在 LINE 裡再按一次官方帳號發送");
-        return;
-      }
-      if (status === "login") {
-        showToast("正在前往 LINE 授權，完成後再按一次官方帳號發送");
-        return;
-      }
-      if (status === "no-token") {
-        showToast("LINE 授權尚未完成，請重新開啟 LIFF 後再試一次");
-        return;
-      }
-    } catch (error) {
-      console.warn("Official account send failed", error);
-      showToast(error.message || "官方帳號發送失敗，請確認後端與 LINE 設定");
-    }
+  document.querySelector("#viewLineShareBtn").addEventListener("click", (event) => {
+    handleLineShareClick(event, event.currentTarget);
   });
+
+  document.querySelector("#officialSendBtn").addEventListener("click", handleOfficialSendClick);
+  document.querySelector("#viewOfficialSendBtn").addEventListener("click", handleOfficialSendClick);
 
   document.querySelector("#publicLinkBtn").addEventListener("click", async () => {
     const { url, omittedImages } = preparePublicShare();

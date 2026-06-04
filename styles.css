@@ -442,6 +442,10 @@ input[type="range"] {
   font-size: 0.86rem;
 }
 
+.view-actions {
+  display: none;
+}
+
 .edit-mode-btn {
   display: none;
 }
@@ -471,6 +475,8 @@ body.view-mode .preview-area {
 }
 
 body.view-mode .preview-toolbar {
+  display: grid;
+  gap: 10px;
   width: min(100%, 430px);
   margin: 0 auto 10px;
 }
@@ -481,6 +487,17 @@ body.view-mode .preview-toolbar > span {
 
 body.view-mode .edit-mode-btn {
   display: inline-flex;
+  width: 100%;
+}
+
+body.view-mode .view-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+body.view-mode .view-actions .ghost-btn,
+body.view-mode .view-actions .solid-btn {
   width: 100%;
 }
 

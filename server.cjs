@@ -151,6 +151,56 @@ function buildFlexBusinessCard(card, publicUrl) {
     });
   }
 
+  const websiteLines = [
+    card.website ? `網站：${makeLink(card.website)}` : "",
+    card.social ? `社群：${makeLink(card.social)}` : "",
+  ].filter(Boolean);
+
+  if (websiteLines.length) {
+    contents.push({
+      type: "box",
+      layout: "vertical",
+      margin: "md",
+      spacing: "xs",
+      contents: websiteLines.map((line) => ({
+        type: "text",
+        text: clampText(line, 90),
+        size: "xs",
+        color: muted,
+        wrap: true,
+      })),
+    });
+  }
+
+  const caseSummaries = (Array.isArray(card.cases) ? card.cases : [])
+    .filter((item) => String(item.title || item.category || item.description || "").trim())
+    .slice(0, 3);
+
+  if (caseSummaries.length) {
+    contents.push({
+      type: "box",
+      layout: "vertical",
+      margin: "md",
+      backgroundColor: caseBg,
+      cornerRadius: "md",
+      paddingAll: "12px",
+      spacing: "sm",
+      contents: [
+        { type: "text", text: clampText(card.caseTitle, 40, "作品案例 / 菜單"), size: "xs", weight: "bold", color: accent },
+        ...caseSummaries.map((item, index) => ({
+          type: "box",
+          layout: "vertical",
+          margin: index === 0 ? "xs" : "sm",
+          contents: [
+            { type: "text", text: clampText(item.title, 42, `作品 ${index + 1}`), size: "sm", weight: "bold", color: text, wrap: true },
+            item.category ? { type: "text", text: clampText(item.category, 36), size: "xs", color: accent, wrap: true, margin: "xs" } : null,
+            item.description ? { type: "text", text: clampText(item.description, 90), size: "xs", color: muted, wrap: true, margin: "xs" } : null,
+          ].filter(Boolean),
+        })),
+      ],
+    });
+  }
+
   const caseButtons = (Array.isArray(card.cases) ? card.cases : [])
     .filter((item) => String(item.title || item.link || "").trim() && String(item.link || "").trim())
     .slice(0, 3)
@@ -158,7 +208,7 @@ function buildFlexBusinessCard(card, publicUrl) {
     .filter(Boolean);
 
   const footerButtons = [
-    optionalButton("查看完整名片", publicUrl, { style: "primary" }),
+    optionalButton("開啟互動名片", publicUrl, { style: "primary" }),
     optionalButton("撥打電話", card.phone ? `tel:${String(card.phone).replace(/[^\d+]/g, "")}` : ""),
     optionalButton("加 LINE", makeLineProfileUrl(card.lineId)),
     optionalButton("官方網站", card.website),
