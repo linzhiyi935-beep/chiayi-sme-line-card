@@ -140,6 +140,7 @@ const saveStatus = document.querySelector("#saveStatus");
 const toast = document.querySelector("#toast");
 const caseDialog = document.querySelector("#caseDialog");
 let isCardMode = hasSharedCard();
+let liffReadyPromise = null;
 
 function getParamFromUrl(name) {
   const params = new URLSearchParams(window.location.search);
@@ -453,6 +454,17 @@ function flexImageBox(url, options = {}) {
   };
 }
 
+function ensureLiffReady() {
+  if (!window.liff || !LIFF_ID) return Promise.resolve(false);
+  if (!liffReadyPromise) {
+    liffReadyPromise = window.liff.init({ liffId: LIFF_ID }).then(() => true).catch((error) => {
+      liffReadyPromise = null;
+      throw error;
+    });
+  }
+  return liffReadyPromise;
+}
+
 function buildFlexBusinessCard(publicUrl) {
   const bg = asFlexColor(state.colors.cardBg, "#ffffff");
   const text = asFlexColor(state.colors.text, "#183128");
@@ -626,7 +638,7 @@ function buildFlexBusinessCard(publicUrl) {
 async function shareFlexCardToLine(url) {
   if (!window.liff || !LIFF_ID) return "unavailable";
 
-  await window.liff.init({ liffId: LIFF_ID });
+  await ensureLiffReady();
 
   if (!window.liff.isInClient()) {
     return "external";
@@ -734,7 +746,7 @@ async function saveOfficialCard(card) {
 async function sendCardByOfficialAccount(url, encoded) {
   if (!window.liff || !LIFF_ID) return "unavailable";
 
-  await window.liff.init({ liffId: LIFF_ID });
+  await ensureLiffReady();
 
   if (!window.liff.isInClient()) {
     window.location.href = `${LIFF_URL}?card=${encoded}`;
@@ -805,48 +817,56 @@ async function sendCardByOfficialAccount(url, encoded) {
 
 async function handleLineShareClick(event, trigger) {
   event?.preventDefault();
-  showToast("正在準備 LINE 名片");
+  showToast("\u6b63\u5728\u958b\u555f LINE \u597d\u53cb\u9078\u64c7");
   let { url, encoded, omittedImages } = preparePublicShare();
   const cardId = getParamFromUrl("cardId");
   if (cardId) {
     url = `${LIFF_URL}?cardId=${encodeURIComponent(cardId)}`;
   }
-  const copied = await copyText(url);
+
   try {
     const shareStatus = await shareFlexCardToLine(url);
     if (shareStatus === "shared") {
-      showToast(`LINE 名片已送出${omittedImages ? "，上傳圖片會留在本機預覽" : ""}`);
+      showToast(`\u5df2\u958b\u555f LINE \u5206\u4eab${omittedImages ? "\uff0c\u90e8\u5206\u672c\u6a5f\u5716\u7247\u6703\u6539\u7528\u9023\u7d50\u5448\u73fe" : ""}`);
       return;
     }
     if (shareStatus === "external") {
       const liffLink = cardId ? `${LIFF_URL}?cardId=${encodeURIComponent(cardId)}` : `${LIFF_URL}?card=${encoded}`;
       if (trigger) trigger.href = liffLink;
-      showToast("正在開啟 LINE，請在 LINE 裡再按一次送出名片");
+      showToast("\u8acb\u5728 LINE App \u88e1\u958b\u555f\u5f8c\u518d\u6309\u5206\u4eab\u7d66\u597d\u53cb");
       window.setTimeout(() => {
         window.location.href = liffLink;
       }, 500);
       return;
     }
     if (shareStatus === "login") {
-      showToast("正在前往 LINE 登入授權，完成後再按一次送出名片");
+      showToast("\u8acb\u5148\u5b8c\u6210 LINE \u767b\u5165\uff0c\u56de\u4f86\u5f8c\u518d\u6309\u4e00\u6b21\u5206\u4eab\u7d66\u597d\u53cb");
       return;
     }
     if (shareStatus === "cancelled") {
-      showToast("已取消 LINE 分享");
+      showToast("\u5df2\u53d6\u6d88 LINE \u5206\u4eab");
+      return;
+    }
+    if (shareStatus === "unavailable") {
+      showToast("LINE \u597d\u53cb\u9078\u64c7\u529f\u80fd\u5c1a\u672a\u555f\u7528\uff0c\u8acb\u5230 LINE Developers \u7684 LIFF \u958b\u555f shareTargetPicker");
       return;
     }
   } catch (error) {
     console.warn("LINE LIFF share failed", error);
+    if (window.liff?.isInClient?.()) {
+      showToast(`\u5206\u4eab\u7d66\u597d\u53cb\u6c92\u6709\u6253\u958b\uff1a${error.message || "\u8acb\u78ba\u8a8d shareTargetPicker \u5df2\u555f\u7528"}`);
+      return;
+    }
   }
 
   const liffLink = cardId ? `${LIFF_URL}?cardId=${encodeURIComponent(cardId)}` : `${LIFF_URL}?card=${encoded}`;
+  const copied = await copyText(url);
   if (trigger) trigger.href = liffLink;
-  showToast(copied ? "請用手機 LINE 開啟本頁或 LIFF 連結；公開名片連結已先複製" : "請用手機 LINE 開啟本頁或 LIFF 連結");
+  showToast(copied ? "\u5df2\u8907\u88fd\u540d\u7247\u9023\u7d50\uff0c\u8acb\u7528 LINE App \u958b\u555f\u5f8c\u5206\u4eab" : "\u8acb\u7528 LINE App \u958b\u555f\u5f8c\u5206\u4eab");
   window.setTimeout(() => {
     window.location.href = liffLink;
   }, 500);
 }
-
 async function handleOfficialSendClick() {
   showToast("正在處理圖片並發送名片");
   const { url, encoded } = preparePublicShare();
@@ -1285,3 +1305,6 @@ attachEvents();
 applyMode();
 render(true);
 loadSavedCardFromCurrentUrl();
+if (getParamFromUrl("cardId")) {
+  ensureLiffReady().catch((error) => console.warn("LIFF init preload failed", error));
+}
