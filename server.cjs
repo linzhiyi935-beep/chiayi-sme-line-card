@@ -105,6 +105,39 @@ function isPublicImageUrl(value) {
   return /^https:\/\/.+/i.test(String(value || "").trim());
 }
 
+function getUploadedFilenameFromUrl(req, value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw, getRequestBaseUrl(req));
+    if (!parsed.pathname.startsWith("/uploads/")) return "";
+    return path.basename(decodeURIComponent(parsed.pathname));
+  } catch {
+    return "";
+  }
+}
+
+async function copyUploadedImageForCard(req, id, key, value) {
+  const filename = getUploadedFilenameFromUrl(req, value);
+  if (!filename) return value;
+
+  const sourcePath = path.join(uploadDir, filename);
+  if (!sourcePath.startsWith(uploadDir)) return value;
+
+  const ext = path.extname(filename).toLowerCase();
+  if (!types[ext] || !types[ext].startsWith("image/")) return value;
+
+  const targetPath = path.join(cardDir, `${id}-${key}${ext}`);
+  if (!targetPath.startsWith(cardDir)) return value;
+
+  try {
+    await fs.promises.copyFile(sourcePath, targetPath);
+    return `${getRequestBaseUrl(req)}/api/cards/${id}/image/${key}`;
+  } catch {
+    return value;
+  }
+}
+
 function imageBox(url, options = {}) {
   if (!isPublicImageUrl(url)) return null;
   return {
@@ -378,9 +411,14 @@ async function handleSaveCard(req, res) {
 
     await fs.promises.mkdir(cardDir, { recursive: true });
     const id = crypto.randomBytes(8).toString("hex");
+    const card = {
+      ...body.card,
+      avatar: await copyUploadedImageForCard(req, id, "avatar", body.card.avatar),
+      cover: await copyUploadedImageForCard(req, id, "cover", body.card.cover),
+    };
     const payload = {
       createdAt: new Date().toISOString(),
-      card: body.card,
+      card,
     };
     await fs.promises.writeFile(path.join(cardDir, `${id}.json`), JSON.stringify(payload), "utf8");
     sendJson(res, 200, { id, url: `${getRequestBaseUrl(req)}/?cardId=${id}` });
@@ -409,6 +447,36 @@ async function handleGetCard(req, res, id) {
   } catch {
     sendJson(res, 404, { error: "card_not_found", message: "card not found" });
   }
+}
+
+async function handleGetCardImage(req, res, id, key) {
+  const safeId = String(id || "").replace(/[^a-f0-9]/gi, "");
+  const safeKey = String(key || "").replace(/[^a-z]/gi, "");
+  if (!safeId || !["avatar", "cover"].includes(safeKey)) {
+    res.writeHead(404);
+    res.end("Not found");
+    return;
+  }
+
+  const extensions = [...new Set(Object.values(imageTypes))];
+  for (const ext of extensions) {
+    const filePath = path.join(cardDir, `${safeId}-${safeKey}.${ext}`);
+    if (!filePath.startsWith(cardDir)) continue;
+    try {
+      const data = await fs.promises.readFile(filePath);
+      res.writeHead(200, {
+        "Content-Type": types[path.extname(filePath).toLowerCase()] || "application/octet-stream",
+        "Cache-Control": "public, max-age=31536000, immutable",
+      });
+      res.end(data);
+      return;
+    } catch {
+      // Try the next supported image extension.
+    }
+  }
+
+  res.writeHead(404);
+  res.end("Not found");
 }
 
 async function replyMessage(replyToken, messages) {
@@ -534,6 +602,11 @@ http
     }
     if (req.method === "POST" && cleanPath === "/api/cards") {
       await handleSaveCard(req, res);
+      return;
+    }
+    const cardImageMatch = cleanPath.match(/^\/api\/cards\/([a-f0-9]+)\/image\/(avatar|cover)$/i);
+    if (req.method === "GET" && cardImageMatch) {
+      await handleGetCardImage(req, res, cardImageMatch[1], cardImageMatch[2]);
       return;
     }
     if (req.method === "GET" && cleanPath.startsWith("/api/cards/")) {
