@@ -2,12 +2,14 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const os = require("os");
 
 const root = __dirname;
 const port = Number(process.env.PORT || 4173);
 const loginChannelId = process.env.LINE_LOGIN_CHANNEL_ID || "2010280088";
 const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
 const channelSecret = process.env.LINE_CHANNEL_SECRET || "";
+const uploadDir = path.join(os.tmpdir(), "line-card-images");
 
 const types = {
   ".html": "text/html; charset=utf-8",
@@ -17,6 +19,15 @@ const types = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".svg": "image/svg+xml",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+};
+
+const imageTypes = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
 };
 
 function sendJson(res, status, body) {
@@ -83,6 +94,24 @@ function makeLineProfileUrl(lineId) {
   return `https://line.me/R/ti/p/${encodeURIComponent(value)}`;
 }
 
+function isPublicImageUrl(value) {
+  return /^https:\/\/.+/i.test(String(value || "").trim());
+}
+
+function imageBox(url, options = {}) {
+  if (!isPublicImageUrl(url)) return null;
+  return {
+    type: "image",
+    url,
+    size: options.size || "full",
+    aspectRatio: options.aspectRatio || "16:9",
+    aspectMode: "cover",
+    gravity: "center",
+    margin: options.margin || "none",
+    cornerRadius: options.cornerRadius,
+  };
+}
+
 function buildFlexBusinessCard(card, publicUrl) {
   const colors = card.colors || {};
   const bg = asFlexColor(colors.cardBg, "#ffffff");
@@ -103,16 +132,39 @@ function buildFlexBusinessCard(card, publicUrl) {
   if (names) heroTexts.push({ type: "text", text: clampText(names, 48), size: "sm", color: muted, wrap: true, margin: "sm" });
   if (card.bio) heroTexts.push({ type: "text", text: clampText(card.bio, 180), size: "sm", color: text, wrap: true, margin: "md" });
 
+  const avatarImage = imageBox(card.avatar, {
+    size: "md",
+    aspectRatio: "1:1",
+    cornerRadius: card.avatarShape === "square" ? "md" : "100px",
+  });
+
   const contents = [
+    card.cover
+      ? imageBox(card.cover, {
+          aspectRatio: "20:9",
+          cornerRadius: "md",
+        })
+      : null,
     {
       type: "box",
-      layout: "vertical",
+      layout: avatarImage ? "horizontal" : "vertical",
       backgroundColor: chipBg,
       cornerRadius: "md",
       paddingAll: "12px",
-      contents: heroTexts,
+      margin: card.cover ? "md" : "none",
+      contents: avatarImage
+        ? [
+            avatarImage,
+            {
+              type: "box",
+              layout: "vertical",
+              margin: "md",
+              contents: heroTexts,
+            },
+          ]
+        : heroTexts,
     },
-  ];
+  ].filter(Boolean);
 
   if (card.products) {
     contents.push({
@@ -274,6 +326,43 @@ async function pushMessage(userId, message) {
   }
 }
 
+function getRequestBaseUrl(req) {
+  const host = req.headers["x-forwarded-host"] || req.headers.host || "";
+  const proto = req.headers["x-forwarded-proto"] || (/^(localhost|127\.0\.0\.1)/i.test(host) ? "http" : "https");
+  return `${proto}://${host}`;
+}
+
+async function handleUploadImages(req, res) {
+  try {
+    const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+    const images = Array.isArray(body.images) ? body.images.slice(0, 8) : [];
+    const uploads = {};
+
+    await fs.promises.mkdir(uploadDir, { recursive: true });
+
+    for (const item of images) {
+      const key = String(item.key || "").replace(/[^a-z0-9_.-]/gi, "").slice(0, 80);
+      const dataUrl = String(item.dataUrl || "");
+      const match = dataUrl.match(/^data:(image\/(?:jpeg|png|webp|gif));base64,([a-z0-9+/=]+)$/i);
+      if (!key || !match) continue;
+
+      const mime = match[1].toLowerCase();
+      const ext = imageTypes[mime];
+      const buffer = Buffer.from(match[2], "base64");
+      if (!ext || buffer.length === 0 || buffer.length > 4 * 1024 * 1024) continue;
+
+      const hash = crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 18);
+      const filename = `${Date.now()}-${hash}.${ext}`;
+      await fs.promises.writeFile(path.join(uploadDir, filename), buffer);
+      uploads[key] = `${getRequestBaseUrl(req)}/uploads/${filename}`;
+    }
+
+    sendJson(res, 200, { uploads });
+  } catch (error) {
+    sendJson(res, 500, { error: "upload_failed", message: error.message || "image upload failed" });
+  }
+}
+
 async function replyMessage(replyToken, messages) {
   if (!channelAccessToken || !replyToken) return;
   await fetch("https://api.line.me/v2/bot/message/reply", {
@@ -325,6 +414,31 @@ async function handleWebhook(req, res) {
 
 function serveStatic(req, res) {
   const urlPath = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
+  if (urlPath.startsWith("/uploads/")) {
+    const filename = path.basename(urlPath);
+    const filePath = path.join(uploadDir, filename);
+    if (!filePath.startsWith(uploadDir)) {
+      res.writeHead(403);
+      res.end("Forbidden");
+      return;
+    }
+
+    fs.readFile(filePath, (error, data) => {
+      if (error) {
+        res.writeHead(404);
+        res.end("Not found");
+        return;
+      }
+
+      res.writeHead(200, {
+        "Content-Type": types[path.extname(filePath).toLowerCase()] || "application/octet-stream",
+        "Cache-Control": "public, max-age=604800",
+      });
+      res.end(data);
+    });
+    return;
+  }
+
   const normalized = path.normalize(urlPath).replace(/^(\.\.[\\/])+/, "");
   const filePath = path.join(root, normalized === "/" ? "index.html" : normalized);
 
@@ -364,6 +478,10 @@ http
     }
     if (req.method === "POST" && cleanPath === "/api/send-card") {
       await handleSendCard(req, res);
+      return;
+    }
+    if (req.method === "POST" && cleanPath === "/api/upload-images") {
+      await handleUploadImages(req, res);
       return;
     }
     if (req.method === "POST" && cleanPath === "/webhook") {
