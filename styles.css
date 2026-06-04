@@ -10,6 +10,15 @@
   --shadow: 0 24px 70px rgba(28, 47, 39, 0.16);
 }
 
+#lineShareBtn,
+#viewLineShareBtn,
+#publicLinkBtn,
+#downloadBtn,
+#copyShareBtn,
+.share-note {
+  display: none !important;
+}
+
 * {
   box-sizing: border-box;
 }
