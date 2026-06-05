@@ -132,7 +132,7 @@ async function copyUploadedImageForCard(req, id, key, value) {
 
   try {
     await fs.promises.copyFile(sourcePath, targetPath);
-    return `${getRequestBaseUrl(req)}/api/cards/${id}/image/${key}`;
+    return `${getRequestBaseUrl(req)}/api/cards/${id}/image/${key}${ext}`;
   } catch {
     return value;
   }
@@ -451,14 +451,16 @@ async function handleGetCard(req, res, id) {
 
 async function handleGetCardImage(req, res, id, key) {
   const safeId = String(id || "").replace(/[^a-f0-9]/gi, "");
-  const safeKey = String(key || "").replace(/[^a-z]/gi, "");
+  const requested = String(key || "").toLowerCase();
+  const safeKey = requested.replace(/\.(jpg|jpeg|png|webp|gif)$/i, "").replace(/[^a-z]/gi, "");
+  const requestedExt = (requested.match(/\.(jpg|jpeg|png|webp|gif)$/i)?.[1] || "").toLowerCase();
   if (!safeId || !["avatar", "cover"].includes(safeKey)) {
     res.writeHead(404);
     res.end("Not found");
     return;
   }
 
-  const extensions = [...new Set(Object.values(imageTypes))];
+  const extensions = requestedExt ? [requestedExt] : [...new Set(Object.values(imageTypes))];
   for (const ext of extensions) {
     const filePath = path.join(cardDir, `${safeId}-${safeKey}.${ext}`);
     if (!filePath.startsWith(cardDir)) continue;
@@ -604,7 +606,7 @@ http
       await handleSaveCard(req, res);
       return;
     }
-    const cardImageMatch = cleanPath.match(/^\/api\/cards\/([a-f0-9]+)\/image\/(avatar|cover)$/i);
+    const cardImageMatch = cleanPath.match(/^\/api\/cards\/([a-f0-9]+)\/image\/((?:avatar|cover)(?:\.(?:jpg|jpeg|png|webp|gif))?)$/i);
     if (req.method === "GET" && cardImageMatch) {
       await handleGetCardImage(req, res, cardImageMatch[1], cardImageMatch[2]);
       return;
