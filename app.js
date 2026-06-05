@@ -519,32 +519,23 @@ function buildFlexBusinessCard(publicUrl) {
   ].filter(Boolean);
 
   const avatarImage = flexImageBox(state.avatar, {
-    size: "md",
+    size: "sm",
     aspectRatio: "1:1",
+    margin: "none",
   });
 
   const contents = [
-    state.cover
-      ? flexImageBox(state.cover, {
-          aspectRatio: "20:9",
-        })
-      : null,
     {
       type: "box",
-      layout: avatarImage ? "horizontal" : "vertical",
+      layout: "vertical",
       backgroundColor: chipBg,
       cornerRadius: "md",
       paddingAll: "12px",
-      margin: state.cover ? "md" : "none",
+      margin: "none",
       contents: avatarImage
         ? [
             avatarImage,
-            {
-              type: "box",
-              layout: "vertical",
-              margin: "md",
-              contents: heroTexts,
-            },
+            ...heroTexts,
           ]
         : heroTexts,
     },
@@ -602,6 +593,11 @@ function buildFlexBusinessCard(publicUrl) {
     contents: {
       type: "bubble",
       size: "mega",
+      hero: state.cover
+        ? flexImageBox(state.cover, {
+            aspectRatio: "20:9",
+          })
+        : undefined,
       body: {
         type: "box",
         layout: "vertical",
