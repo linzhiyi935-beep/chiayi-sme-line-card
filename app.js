@@ -731,7 +731,7 @@ async function buildOfficialCardWithImages() {
   };
 }
 
-async function saveOfficialCard(card) {
+async function saveCardSnapshot(card) {
   const response = await fetch(`${BOT_API_BASE}/api/cards`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -739,11 +739,15 @@ async function saveOfficialCard(card) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.id) {
-    throw new Error(data.message || data.error || "名片短連結建立失敗");
+    throw new Error(data.message || data.error || "save card failed");
   }
-  return `${LIFF_URL}?cardId=${encodeURIComponent(data.id)}`;
+  return data;
 }
 
+async function saveOfficialCard(card) {
+  const data = await saveCardSnapshot(card);
+  return `${LIFF_URL}?cardId=${encodeURIComponent(data.id)}`;
+}
 async function sendCardByOfficialAccount(url, encoded) {
   if (!window.liff || !LIFF_ID) return "unavailable";
 
@@ -826,13 +830,32 @@ async function handleLineShareClick(event, trigger) {
   }
 
   try {
+    const shareSnapshot = await buildOfficialCardWithImages();
+    const savedShare = await saveCardSnapshot(shareSnapshot.card);
+    if (savedShare.id) {
+      url = `${LIFF_URL}?cardId=${encodeURIComponent(savedShare.id)}`;
+      omittedImages = shareSnapshot.omittedImages;
+      if (savedShare.card) {
+        state = {
+          ...state,
+          ...savedShare.card,
+          colors: { ...state.colors, ...(savedShare.card.colors || {}) },
+          cases: Array.isArray(savedShare.card.cases) ? savedShare.card.cases : state.cases,
+        };
+      }
+    }
+  } catch (error) {
+    console.warn("Saved friend share card failed", error);
+  }
+
+  try {
     const shareStatus = await shareFlexCardToLine(url);
     if (shareStatus === "shared") {
       showToast(`\u5df2\u958b\u555f LINE \u5206\u4eab${omittedImages ? "\uff0c\u90e8\u5206\u672c\u6a5f\u5716\u7247\u6703\u6539\u7528\u9023\u7d50\u5448\u73fe" : ""}`);
       return;
     }
     if (shareStatus === "external") {
-      const liffLink = cardId ? `${LIFF_URL}?cardId=${encodeURIComponent(cardId)}` : `${LIFF_URL}?card=${encoded}`;
+      const liffLink = url.startsWith(LIFF_URL) ? url : `${LIFF_URL}?card=${encoded}`;
       if (trigger) trigger.href = liffLink;
       showToast("\u8acb\u5728 LINE App \u88e1\u958b\u555f\u5f8c\u518d\u6309\u5206\u4eab\u7d66\u597d\u53cb");
       window.setTimeout(() => {
@@ -860,7 +883,7 @@ async function handleLineShareClick(event, trigger) {
     }
   }
 
-  const liffLink = cardId ? `${LIFF_URL}?cardId=${encodeURIComponent(cardId)}` : `${LIFF_URL}?card=${encoded}`;
+  const liffLink = url.startsWith(LIFF_URL) ? url : `${LIFF_URL}?card=${encoded}`;
   const copied = await copyText(url);
   if (trigger) trigger.href = liffLink;
   showToast(copied ? "\u5df2\u8907\u88fd\u540d\u7247\u9023\u7d50\uff0c\u8acb\u7528 LINE App \u958b\u555f\u5f8c\u5206\u4eab" : "\u8acb\u7528 LINE App \u958b\u555f\u5f8c\u5206\u4eab");

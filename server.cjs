@@ -117,14 +117,51 @@ function getUploadedFilenameFromUrl(req, value) {
   }
 }
 
+function getStoredCardImageFromUrl(req, value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw, getRequestBaseUrl(req));
+    const match = parsed.pathname.match(/^\/api\/cards\/([a-f0-9]+)\/image\/((?:avatar|cover)(?:\.(?:jpg|jpeg|png|webp|gif))?)$/i);
+    if (!match) return null;
+    const sourceId = match[1];
+    const requested = match[2].toLowerCase();
+    const key = requested.replace(/\.(jpg|jpeg|png|webp|gif)$/i, "");
+    const requestedExt = (requested.match(/\.(jpg|jpeg|png|webp|gif)$/i)?.[1] || "").toLowerCase();
+    return { sourceId, key, requestedExt };
+  } catch {
+    return null;
+  }
+}
+
 async function copyUploadedImageForCard(req, id, key, value) {
   const filename = getUploadedFilenameFromUrl(req, value);
-  if (!filename) return value;
+  let sourcePath = "";
+  let ext = "";
 
-  const sourcePath = path.join(uploadDir, filename);
-  if (!sourcePath.startsWith(uploadDir)) return value;
+  if (filename) {
+    sourcePath = path.join(uploadDir, filename);
+    if (!sourcePath.startsWith(uploadDir)) return value;
+    ext = path.extname(filename).toLowerCase();
+  } else {
+    const storedImage = getStoredCardImageFromUrl(req, value);
+    if (!storedImage || storedImage.key !== key) return value;
+    const extensions = storedImage.requestedExt ? [storedImage.requestedExt] : [...new Set(Object.values(imageTypes))];
+    for (const candidateExt of extensions) {
+      const candidatePath = path.join(cardDir, `${storedImage.sourceId}-${key}.${candidateExt}`);
+      if (!candidatePath.startsWith(cardDir)) continue;
+      try {
+        await fs.promises.access(candidatePath, fs.constants.R_OK);
+        sourcePath = candidatePath;
+        ext = `.${candidateExt}`;
+        break;
+      } catch {
+        // Try the next supported image extension.
+      }
+    }
+    if (!sourcePath) return value;
+  }
 
-  const ext = path.extname(filename).toLowerCase();
   if (!types[ext] || !types[ext].startsWith("image/")) return value;
 
   const targetPath = path.join(cardDir, `${id}-${key}${ext}`);
@@ -421,7 +458,7 @@ async function handleSaveCard(req, res) {
       card,
     };
     await fs.promises.writeFile(path.join(cardDir, `${id}.json`), JSON.stringify(payload), "utf8");
-    sendJson(res, 200, { id, url: `${getRequestBaseUrl(req)}/?cardId=${id}` });
+    sendJson(res, 200, { id, url: `${getRequestBaseUrl(req)}/?cardId=${id}`, card });
   } catch (error) {
     sendJson(res, 500, { error: "save_card_failed", message: error.message || "save card failed" });
   }
