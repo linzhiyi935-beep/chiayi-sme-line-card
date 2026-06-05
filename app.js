@@ -632,6 +632,19 @@ function buildFlexBusinessCard(publicUrl) {
   };
 }
 
+function buildFriendShareMessages(publicUrl) {
+  const imageMessages = [state.cover, state.avatar]
+    .filter((url) => isPublicImageUrl(url))
+    .slice(0, 2)
+    .map((url) => ({
+      type: "image",
+      originalContentUrl: url,
+      previewImageUrl: url,
+    }));
+
+  return [...imageMessages, buildFlexBusinessCard(publicUrl)];
+}
+
 async function shareFlexCardToLine(url) {
   if (!window.liff || !LIFF_ID) return "unavailable";
 
@@ -650,7 +663,7 @@ async function shareFlexCardToLine(url) {
     return "unavailable";
   }
 
-  const result = await window.liff.shareTargetPicker([buildFlexBusinessCard(url)]);
+  const result = await window.liff.shareTargetPicker(buildFriendShareMessages(url));
   return result ? "shared" : "cancelled";
 }
 
