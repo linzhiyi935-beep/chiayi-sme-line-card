@@ -501,9 +501,11 @@ async function handleGetCardImage(req, res, id, key) {
       const data = await fs.promises.readFile(filePath);
       res.writeHead(200, {
         "Content-Type": types[path.extname(filePath).toLowerCase()] || "application/octet-stream",
+        "Content-Length": data.length,
         "Cache-Control": "public, max-age=31536000, immutable",
+        "X-Content-Type-Options": "nosniff",
       });
-      res.end(data);
+      res.end(req.method === "HEAD" ? undefined : data);
       return;
     } catch {
       // Try the next supported image extension.
@@ -583,9 +585,11 @@ function serveStatic(req, res) {
 
       res.writeHead(200, {
         "Content-Type": types[path.extname(filePath).toLowerCase()] || "application/octet-stream",
+        "Content-Length": data.length,
         "Cache-Control": "public, max-age=604800",
+        "X-Content-Type-Options": "nosniff",
       });
-      res.end(data);
+      res.end(req.method === "HEAD" ? undefined : data);
     });
     return;
   }
@@ -640,7 +644,7 @@ http
       return;
     }
     const cardImageMatch = cleanPath.match(/^\/api\/cards\/([a-f0-9]+)\/image\/((?:avatar|cover)(?:\.(?:jpg|jpeg|png|webp|gif))?)$/i);
-    if (req.method === "GET" && cardImageMatch) {
+    if ((req.method === "GET" || req.method === "HEAD") && cardImageMatch) {
       await handleGetCardImage(req, res, cardImageMatch[1], cardImageMatch[2]);
       return;
     }
