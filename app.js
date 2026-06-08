@@ -632,17 +632,42 @@ function buildFlexBusinessCard(publicUrl) {
   };
 }
 
-function buildFriendShareMessages(publicUrl) {
-  const imageMessages = [state.cover, state.avatar]
-    .filter((url) => isPublicImageUrl(url))
-    .slice(0, 2)
-    .map((url) => ({
-      type: "image",
-      originalContentUrl: url,
-      previewImageUrl: url,
-    }));
+async function createCardScreenshotMessage() {
+  if (!window.html2canvas) return null;
 
-  return [...imageMessages, buildFlexBusinessCard(publicUrl)];
+  const cardElement = document.querySelector("#cardCanvas");
+  if (!cardElement) return null;
+
+  const canvas = await window.html2canvas(cardElement, {
+    backgroundColor: null,
+    scale: Math.min(window.devicePixelRatio || 2, 2),
+    useCORS: true,
+  });
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+
+  const response = await fetch(`${BOT_API_BASE}/api/upload-images`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ images: [{ key: "cardImage", dataUrl }] }),
+  });
+  const data = await response.json().catch(() => ({}));
+  const imageUrl = data.uploads?.cardImage;
+  if (!response.ok || !isPublicImageUrl(imageUrl)) return null;
+
+  return {
+    type: "image",
+    originalContentUrl: imageUrl,
+    previewImageUrl: imageUrl,
+  };
+}
+
+async function buildFriendShareMessages(publicUrl) {
+  const screenshotMessage = await createCardScreenshotMessage().catch((error) => {
+    console.warn("Card screenshot share image failed", error);
+    return null;
+  });
+
+  return [screenshotMessage, buildFlexBusinessCard(publicUrl)].filter(Boolean);
 }
 
 async function shareFlexCardToLine(url) {
@@ -663,7 +688,7 @@ async function shareFlexCardToLine(url) {
     return "unavailable";
   }
 
-  const result = await window.liff.shareTargetPicker(buildFriendShareMessages(url));
+  const result = await window.liff.shareTargetPicker(await buildFriendShareMessages(url));
   return result ? "shared" : "cancelled";
 }
 
@@ -831,7 +856,7 @@ async function sendCardByOfficialAccount(url, encoded) {
 
 async function handleLineShareClick(event, trigger) {
   event?.preventDefault();
-  showToast("\u6b63\u5728\u958b\u555f LINE \u597d\u53cb\u9078\u64c7");
+  showToast("\u6b63\u5728\u7522\u751f\u540d\u7247\u5716\u7247\u4e26\u958b\u555f LINE \u597d\u53cb\u9078\u64c7");
   let { url, encoded, omittedImages } = preparePublicShare();
   const cardId = getParamFromUrl("cardId");
   if (cardId) {
