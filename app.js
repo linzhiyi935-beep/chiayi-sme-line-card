@@ -1050,7 +1050,14 @@ async function sendCardByOfficialAccount(url, encoded) {
   await ensureLiffReady();
 
   if (!window.liff.isInClient()) {
-    window.location.href = `${LIFF_URL}?card=${encoded}`;
+    try {
+      const officialCard = await buildOfficialCardWithImages();
+      const savedOfficial = await saveCardSnapshot(officialCard.card);
+      window.location.href = `${LIFF_URL}?cardId=${encodeURIComponent(savedOfficial.id)}`;
+    } catch (error) {
+      console.warn("External official card save failed", error);
+      window.location.href = `${LIFF_URL}?card=${encoded}`;
+    }
     return "external";
   }
 

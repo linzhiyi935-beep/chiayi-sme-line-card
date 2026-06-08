@@ -12,6 +12,7 @@ const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
 const channelSecret = process.env.LINE_CHANNEL_SECRET || "";
 const uploadDir = path.join(os.tmpdir(), "line-card-images");
 const cardDir = path.join(os.tmpdir(), "line-card-states");
+let embeddedFontCss = "";
 
 const types = {
   ".html": "text/html; charset=utf-8",
@@ -190,6 +191,25 @@ function imageBox(url, options = {}) {
   };
 }
 
+function getEmbeddedFontCss() {
+  if (embeddedFontCss) return embeddedFontCss;
+
+  try {
+    const cssPath = require.resolve("@fontsource-variable/noto-sans-tc/index.css");
+    const fontRoot = path.dirname(cssPath);
+    embeddedFontCss = fs.readFileSync(cssPath, "utf8").replace(/url\((\.\/files\/[^)]+)\)/g, (_match, relativePath) => {
+      const fontPath = path.join(fontRoot, relativePath.replace(/^\.\//, ""));
+      const data = fs.readFileSync(fontPath);
+      return `url(data:font/woff2;base64,${data.toString("base64")})`;
+    }).replaceAll("woff2-variations", "woff2");
+  } catch (error) {
+    console.warn("Embedded font load failed", error);
+    embeddedFontCss = "";
+  }
+
+  return embeddedFontCss;
+}
+
 function escapeXml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -219,7 +239,7 @@ function svgText(text, x, y, options = {}) {
   const lines = wrapSvgText(text, options.maxChars || 28, options.maxLines || 3);
   const lineHeight = options.lineHeight || 38;
   return lines
-    .map((line, index) => `<text x="${x}" y="${y + index * lineHeight}" fill="${options.color || "#183128"}" font-size="${options.size || 28}" font-weight="${options.weight || 400}" font-family="'Noto Sans TC','Microsoft JhengHei',Arial,sans-serif">${escapeXml(line)}</text>`)
+    .map((line, index) => `<text x="${x}" y="${y + index * lineHeight}" fill="${options.color || "#183128"}" font-size="${options.size || 28}" font-weight="${options.weight || 400}" font-family="'Noto Sans TC Variable','Noto Sans TC','Microsoft JhengHei',Arial,sans-serif">${escapeXml(line)}</text>`)
     .join("");
 }
 
@@ -276,6 +296,10 @@ async function buildCardPosterSvg(req, card) {
 
   let y = 470;
   const parts = [];
+  const fontCss = getEmbeddedFontCss();
+  if (fontCss) {
+    parts.push(`<defs><style><![CDATA[${fontCss} text { font-family: 'Noto Sans TC Variable','Noto Sans TC','Microsoft JhengHei',Arial,sans-serif; }]]></style></defs>`);
+  }
   parts.push(`<rect width="900" height="1700" fill="${pageBg}"/>`);
   parts.push(`<rect x="42" y="42" width="816" height="1580" rx="34" fill="${cardBg}" stroke="${border}" stroke-width="5"/>`);
   parts.push(`<clipPath id="coverClip"><rect x="72" y="72" width="756" height="260" rx="28"/></clipPath>`);
