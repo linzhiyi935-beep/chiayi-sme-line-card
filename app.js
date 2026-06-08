@@ -572,6 +572,36 @@ function buildFlexBusinessCard(publicUrl) {
     });
   }
 
+  const caseSummaries = (Array.isArray(state.cases) ? state.cases : [])
+    .filter((item) => String(item.title || item.category || item.description || item.image || "").trim())
+    .slice(0, 3);
+
+  if (caseSummaries.length) {
+    contents.push({
+      type: "box",
+      layout: "vertical",
+      margin: "md",
+      backgroundColor: caseBg,
+      cornerRadius: "md",
+      paddingAll: "12px",
+      spacing: "sm",
+      contents: [
+        { type: "text", text: clampText(state.caseTitle, 40, "作品案例 / 精選菜單"), size: "xs", weight: "bold", color: accent },
+        ...caseSummaries.map((item, index) => ({
+          type: "box",
+          layout: "vertical",
+          margin: index === 0 ? "xs" : "sm",
+          contents: [
+            item.image ? flexImageBox(item.image, { aspectRatio: "16:9", margin: "xs" }) : null,
+            { type: "text", text: clampText(item.title, 42, `作品 ${index + 1}`), size: "sm", weight: "bold", color: text, wrap: true },
+            item.category ? { type: "text", text: clampText(item.category, 36), size: "xs", color: accent, wrap: true, margin: "xs" } : null,
+            item.description ? { type: "text", text: clampText(item.description, 90), size: "xs", color: muted, wrap: true, margin: "xs" } : null,
+          ].filter(Boolean),
+        })),
+      ],
+    });
+  }
+
   const footerButtons = [
     optionalButton("查看完整名片", publicUrl, { style: "primary" }),
     optionalButton("撥打電話", state.phone ? `tel:${state.phone.replace(/[^\d+]/g, "")}` : "", { style: "link" }),
@@ -742,6 +772,15 @@ async function buildOfficialCardWithImages() {
     });
   }
 
+  for (const [index, item] of (Array.isArray(state.cases) ? state.cases : []).slice(0, 3).entries()) {
+    if (shouldUploadImage(item.image, placeholderCase)) {
+      images.push({
+        key: `case${index}`,
+        dataUrl: await resizeDataImage(item.image, 1000, 700),
+      });
+    }
+  }
+
   if (!images.length) return { card: portable, omittedImages };
 
   const response = await fetch(`${BOT_API_BASE}/api/upload-images`, {
@@ -760,6 +799,10 @@ async function buildOfficialCardWithImages() {
       ...portable,
       avatar: data.uploads?.avatar || portable.avatar,
       cover: data.uploads?.cover || portable.cover,
+      cases: portable.cases.map((item, index) => ({
+        ...item,
+        image: data.uploads?.[`case${index}`] || item.image,
+      })),
     },
     omittedImages,
   };

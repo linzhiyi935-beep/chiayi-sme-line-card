@@ -122,7 +122,7 @@ function getStoredCardImageFromUrl(req, value) {
   if (!raw) return null;
   try {
     const parsed = new URL(raw, getRequestBaseUrl(req));
-    const match = parsed.pathname.match(/^\/api\/cards\/([a-f0-9]+)\/image\/((?:avatar|cover)(?:\.(?:jpg|jpeg|png|webp|gif))?)$/i);
+    const match = parsed.pathname.match(/^\/api\/cards\/([a-f0-9]+)\/image\/((?:avatar|cover|case\d+)(?:\.(?:jpg|jpeg|png|webp|gif))?)$/i);
     if (!match) return null;
     const sourceId = match[1];
     const requested = match[2].toLowerCase();
@@ -311,6 +311,7 @@ function buildFlexBusinessCard(card, publicUrl) {
           margin: index === 0 ? "xs" : "sm",
           contents: [
             { type: "text", text: clampText(item.title, 42, `作品 ${index + 1}`), size: "sm", weight: "bold", color: text, wrap: true },
+            item.image ? imageBox(item.image, { aspectRatio: "16:9", margin: "xs" }) : null,
             item.category ? { type: "text", text: clampText(item.category, 36), size: "xs", color: accent, wrap: true, margin: "xs" } : null,
             item.description ? { type: "text", text: clampText(item.description, 90), size: "xs", color: muted, wrap: true, margin: "xs" } : null,
           ].filter(Boolean),
@@ -445,10 +446,17 @@ async function handleSaveCard(req, res) {
 
     await fs.promises.mkdir(cardDir, { recursive: true });
     const id = crypto.randomBytes(8).toString("hex");
+    const cases = await Promise.all(
+      (Array.isArray(body.card.cases) ? body.card.cases : []).map(async (item, index) => ({
+        ...item,
+        image: await copyUploadedImageForCard(req, id, `case${index}`, item.image),
+      })),
+    );
     const card = {
       ...body.card,
       avatar: await copyUploadedImageForCard(req, id, "avatar", body.card.avatar),
       cover: await copyUploadedImageForCard(req, id, "cover", body.card.cover),
+      cases,
     };
     const payload = {
       createdAt: new Date().toISOString(),
@@ -486,9 +494,9 @@ async function handleGetCard(req, res, id) {
 async function handleGetCardImage(req, res, id, key) {
   const safeId = String(id || "").replace(/[^a-f0-9]/gi, "");
   const requested = String(key || "").toLowerCase();
-  const safeKey = requested.replace(/\.(jpg|jpeg|png|webp|gif)$/i, "").replace(/[^a-z]/gi, "");
+  const safeKey = requested.replace(/\.(jpg|jpeg|png|webp|gif)$/i, "").replace(/[^a-z0-9]/gi, "");
   const requestedExt = (requested.match(/\.(jpg|jpeg|png|webp|gif)$/i)?.[1] || "").toLowerCase();
-  if (!safeId || !["avatar", "cover"].includes(safeKey)) {
+  if (!safeId || !/^(avatar|cover|case\d+)$/.test(safeKey)) {
     res.writeHead(404);
     res.end("Not found");
     return;
@@ -646,7 +654,7 @@ http
       await handleSaveCard(req, res);
       return;
     }
-    const cardImageMatch = cleanPath.match(/^\/api\/cards\/([a-f0-9]+)\/image\/((?:avatar|cover)(?:\.(?:jpg|jpeg|png|webp|gif))?)$/i);
+    const cardImageMatch = cleanPath.match(/^\/api\/cards\/([a-f0-9]+)\/image\/((?:avatar|cover|case\d+)(?:\.(?:jpg|jpeg|png|webp|gif))?)$/i);
     if ((req.method === "GET" || req.method === "HEAD") && cardImageMatch) {
       await handleGetCardImage(req, res, cardImageMatch[1], cardImageMatch[2]);
       return;
