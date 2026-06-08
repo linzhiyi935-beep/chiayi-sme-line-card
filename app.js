@@ -520,8 +520,8 @@ function buildFlexBusinessCard(publicUrl) {
   ].filter(Boolean);
 
   const avatarImage = flexImageBox(state.avatar, {
-    size: "sm",
-    aspectRatio: "1:1",
+    size: state.avatarShape === "full" ? "full" : "sm",
+    aspectRatio: state.avatarShape === "full" ? "20:9" : "1:1",
     align: "start",
     margin: "none",
   });
@@ -973,6 +973,38 @@ function resizeDataImage(dataUrl, maxWidth = 1200, maxHeight = 1200) {
   });
 }
 
+async function createAvatarShareImage(dataUrl) {
+  if (!isLocalDataImage(dataUrl) || dataUrl.startsWith("data:image/gif") || dataUrl.startsWith("data:image/svg")) {
+    return resizeDataImage(dataUrl, 600, 600);
+  }
+
+  const image = await loadCanvasImage(dataUrl);
+  if (!image) return resizeDataImage(dataUrl, 600, 600);
+
+  const isFull = state.avatarShape === "full";
+  const size = isFull ? { width: 1200, height: 600 } : { width: 600, height: 600 };
+  const canvas = document.createElement("canvas");
+  canvas.width = size.width;
+  canvas.height = size.height;
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, size.width, size.height);
+
+  context.save();
+  if (state.avatarShape === "circle") {
+    context.beginPath();
+    context.arc(size.width / 2, size.height / 2, Math.min(size.width, size.height) / 2, 0, Math.PI * 2);
+    context.clip();
+  }
+
+  const scale = Math.max(size.width / image.width, size.height / image.height);
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  context.drawImage(image, (size.width - drawWidth) / 2, (size.height - drawHeight) / 2, drawWidth, drawHeight);
+  context.restore();
+
+  return state.avatarShape === "circle" ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.86);
+}
+
 async function buildOfficialCardWithImages() {
   const { portable, omittedImages } = getPortableState();
   const images = [];
@@ -980,7 +1012,7 @@ async function buildOfficialCardWithImages() {
   if (shouldUploadImage(state.avatar, placeholderAvatar)) {
     images.push({
       key: "avatar",
-      dataUrl: await resizeDataImage(state.avatar, 600, 600),
+      dataUrl: await createAvatarShareImage(state.avatar),
     });
   }
 

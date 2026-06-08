@@ -359,8 +359,8 @@ function buildFlexBusinessCard(card, publicUrl) {
   if (card.bio) heroTexts.push({ type: "text", text: clampText(card.bio, 180), size: "sm", color: text, wrap: true, margin: "md" });
 
   const avatarImage = imageBox(card.avatar, {
-    size: "sm",
-    aspectRatio: "1:1",
+    size: card.avatarShape === "full" ? "full" : "sm",
+    aspectRatio: card.avatarShape === "full" ? "20:9" : "1:1",
     align: "start",
     margin: "none",
   });
