@@ -381,15 +381,16 @@ async function verifyIdToken(idToken) {
   return response.json();
 }
 
-async function pushMessage(userId, message) {
+async function pushMessage(userId, messages) {
   if (!channelAccessToken) throw new Error("後端尚未設定 LINE_CHANNEL_ACCESS_TOKEN");
+  const payloadMessages = (Array.isArray(messages) ? messages : [messages]).filter(Boolean).slice(0, 5);
   const response = await fetch("https://api.line.me/v2/bot/message/push", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${channelAccessToken}`,
     },
-    body: JSON.stringify({ to: userId, messages: [message] }),
+    body: JSON.stringify({ to: userId, messages: payloadMessages }),
   });
   if (!response.ok) {
     const detail = await response.text();
@@ -502,6 +503,7 @@ async function handleGetCardImage(req, res, id, key) {
       res.writeHead(200, {
         "Content-Type": types[path.extname(filePath).toLowerCase()] || "application/octet-stream",
         "Content-Length": data.length,
+        "Access-Control-Allow-Origin": "*",
         "Cache-Control": "public, max-age=31536000, immutable",
         "X-Content-Type-Options": "nosniff",
       });
@@ -537,7 +539,7 @@ async function handleSendCard(req, res) {
     }
     const profile = await verifyIdToken(body.idToken);
     const message = buildFlexBusinessCard(body.card, body.publicUrl);
-    await pushMessage(profile.sub, message);
+    await pushMessage(profile.sub, [body.imageMessage, message]);
     sendJson(res, 200, { ok: true });
   } catch (error) {
     sendJson(res, 500, { error: "send_failed", message: error.message || "官方帳號發送失敗" });
@@ -586,6 +588,7 @@ function serveStatic(req, res) {
       res.writeHead(200, {
         "Content-Type": types[path.extname(filePath).toLowerCase()] || "application/octet-stream",
         "Content-Length": data.length,
+        "Access-Control-Allow-Origin": "*",
         "Cache-Control": "public, max-age=604800",
         "X-Content-Type-Options": "nosniff",
       });

@@ -23,10 +23,11 @@ const placeholderCase =
     <path d="M88 238 188 166l70 52 52-40 82 60" fill="none" stroke="#06c755" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`);
 
-const PUBLIC_SITE_URL = "https://linzhiyi935-beep.github.io/chiayi-sme-line-card/";
+const PUBLIC_SITE_URL = "https://chiayi-sme-line-card.onrender.com/";
 const LIFF_ID = "2010280088-IG7ReTtB";
 const LIFF_URL = `https://liff.line.me/${LIFF_ID}`;
-const BOT_API_BASE = window.LINE_BOT_API_BASE || "";
+const isLocalPage = ["localhost", "127.0.0.1", ""].includes(window.location.hostname) || window.location.protocol === "file:";
+const BOT_API_BASE = window.LINE_BOT_API_BASE || (isLocalPage ? PUBLIC_SITE_URL.replace(/\/$/, "") : "");
 
 const themes = [
   {
@@ -379,8 +380,7 @@ function getPortableState() {
 }
 
 function getShareBaseUrl() {
-  const isLocal = ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
-  if (isLocal || window.location.protocol === "file:") return PUBLIC_SITE_URL;
+  if (isLocalPage) return PUBLIC_SITE_URL;
   return `${window.location.origin}${window.location.pathname}`;
 }
 
@@ -640,10 +640,10 @@ async function createCardScreenshotMessage() {
 
   const canvas = await window.html2canvas(cardElement, {
     backgroundColor: null,
-    scale: Math.min(window.devicePixelRatio || 2, 2),
+    scale: Math.min(window.devicePixelRatio || 1.5, 1.5),
     useCORS: true,
   });
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
 
   const response = await fetch(`${BOT_API_BASE}/api/upload-images`, {
     method: "POST",
@@ -828,6 +828,10 @@ async function sendCardByOfficialAccount(url, encoded) {
   if (!idToken) return "no-token";
 
   const officialCard = await buildOfficialCardWithImages();
+  const cardImageMessage = await createCardScreenshotMessage().catch((error) => {
+    console.warn("Official card screenshot image failed", error);
+    return null;
+  });
   let officialPublicUrl = url;
   try {
     officialPublicUrl = await saveOfficialCard(officialCard.card);
@@ -842,6 +846,7 @@ async function sendCardByOfficialAccount(url, encoded) {
       idToken,
       publicUrl: officialPublicUrl,
       card: officialCard.card,
+      imageMessage: cardImageMessage,
     }),
   });
 
