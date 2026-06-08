@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
+const sharp = require("sharp");
 
 const root = __dirname;
 const port = Number(process.env.PORT || 4173);
@@ -186,6 +187,141 @@ function imageBox(url, options = {}) {
     gravity: "center",
     margin: options.margin || "none",
   };
+}
+
+function escapeXml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function wrapSvgText(text, maxChars, maxLines = 4) {
+  const chars = String(text || "").trim().split("");
+  const lines = [];
+  let line = "";
+  for (const char of chars) {
+    if ((line + char).length > maxChars && line) {
+      lines.push(line);
+      line = char;
+      if (lines.length >= maxLines) break;
+    } else {
+      line += char;
+    }
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  return lines;
+}
+
+function svgText(text, x, y, options = {}) {
+  const lines = wrapSvgText(text, options.maxChars || 28, options.maxLines || 3);
+  const lineHeight = options.lineHeight || 38;
+  return lines
+    .map((line, index) => `<text x="${x}" y="${y + index * lineHeight}" fill="${options.color || "#183128"}" font-size="${options.size || 28}" font-weight="${options.weight || 400}" font-family="'Noto Sans TC','Microsoft JhengHei',Arial,sans-serif">${escapeXml(line)}</text>`)
+    .join("");
+}
+
+async function imageDataUriFromLocalUrl(req, value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw, getRequestBaseUrl(req));
+    let filePath = "";
+    if (parsed.pathname.startsWith("/uploads/")) {
+      filePath = path.join(uploadDir, path.basename(decodeURIComponent(parsed.pathname)));
+      if (!filePath.startsWith(uploadDir)) return "";
+    } else {
+      const match = parsed.pathname.match(/^\/api\/cards\/([a-f0-9]+)\/image\/((?:avatar|cover|case\d+)(?:\.(?:jpg|jpeg|png|webp|gif))?)$/i);
+      if (!match) return "";
+      const requested = match[2].toLowerCase();
+      const key = requested.replace(/\.(jpg|jpeg|png|webp|gif)$/i, "").replace(/[^a-z0-9]/gi, "");
+      const ext = (requested.match(/\.(jpg|jpeg|png|webp|gif)$/i)?.[1] || "").toLowerCase();
+      if (!key || !ext) return "";
+      filePath = path.join(cardDir, `${match[1]}-${key}.${ext}`);
+      if (!filePath.startsWith(cardDir)) return "";
+    }
+    const data = await fs.promises.readFile(filePath);
+    const type = types[path.extname(filePath).toLowerCase()] || "image/jpeg";
+    return `data:${type};base64,${data.toString("base64")}`;
+  } catch {
+    return "";
+  }
+}
+
+async function buildCardPosterSvg(req, card) {
+  const colors = card.colors || {};
+  const pageBg = asFlexColor(colors.pageBg, "#e9fff2");
+  const cardBg = asFlexColor(colors.cardBg, "#ffffff");
+  const text = asFlexColor(colors.text, "#183128");
+  const muted = asFlexColor(colors.muted, "#64726d");
+  const accent = asFlexColor(colors.accent, "#197aa0");
+  const border = asFlexColor(colors.border, "#197aa0");
+  const caseBg = asFlexColor(colors.caseBg, "#f0f7fa");
+  const chipBg = asFlexColor(colors.chipBg, "#e6f4f8");
+  const cover = await imageDataUriFromLocalUrl(req, card.cover);
+  const avatar = await imageDataUriFromLocalUrl(req, card.avatar);
+  const cases = (Array.isArray(card.cases) ? card.cases : []).slice(0, 2);
+  const caseImages = await Promise.all(cases.map((item) => imageDataUriFromLocalUrl(req, item.image)));
+  const names = [card.chineseName, card.englishName].filter(Boolean).join(" / ");
+  const contactLines = [
+    card.phone ? `電話：${card.phone}` : "",
+    card.lineId ? `LINE：${card.lineId}` : "",
+    card.email ? `Email：${card.email}` : "",
+    card.address ? `地址：${card.address}` : "",
+    card.website ? `網站：${card.website}` : "",
+    card.social ? `社群：${card.social}` : "",
+  ].filter(Boolean);
+
+  let y = 470;
+  const parts = [];
+  parts.push(`<rect width="900" height="1700" fill="${pageBg}"/>`);
+  parts.push(`<rect x="42" y="42" width="816" height="1580" rx="34" fill="${cardBg}" stroke="${border}" stroke-width="5"/>`);
+  parts.push(`<clipPath id="coverClip"><rect x="72" y="72" width="756" height="260" rx="28"/></clipPath>`);
+  if (cover) parts.push(`<image href="${cover}" x="72" y="72" width="756" height="260" preserveAspectRatio="xMidYMid slice" clip-path="url(#coverClip)"/>`);
+  else parts.push(`<rect x="72" y="72" width="756" height="260" rx="28" fill="${chipBg}"/>`);
+  parts.push(`<clipPath id="avatarClip"><circle cx="175" cy="350" r="78"/></clipPath>`);
+  parts.push(`<circle cx="175" cy="350" r="86" fill="#fff"/>`);
+  if (avatar) parts.push(`<image href="${avatar}" x="97" y="272" width="156" height="156" preserveAspectRatio="xMidYMid slice" clip-path="url(#avatarClip)"/>`);
+  else parts.push(`<circle cx="175" cy="350" r="78" fill="${chipBg}"/>`);
+  parts.push(svgText(card.company, 90, y, { color: accent, size: 28, weight: 800, maxChars: 28, maxLines: 1 }));
+  y += 58;
+  parts.push(svgText(card.displayName || "LINE 數位名片", 90, y, { color: text, size: 50, weight: 900, maxChars: 16, maxLines: 2, lineHeight: 62 }));
+  y += 124;
+  if (names) {
+    parts.push(svgText(names, 90, y, { color: muted, size: 30, weight: 600, maxChars: 28, maxLines: 1 }));
+    y += 54;
+  }
+  parts.push(svgText(card.bio, 90, y, { color: text, size: 30, weight: 400, maxChars: 23, maxLines: 4, lineHeight: 44 }));
+  y += 210;
+  parts.push(`<rect x="90" y="${y}" width="720" height="150" rx="18" fill="${caseBg}"/>`);
+  parts.push(svgText("產品 / 服務", 120, y + 48, { color: text, size: 30, weight: 800, maxChars: 12, maxLines: 1 }));
+  parts.push(svgText(card.products, 120, y + 92, { color: muted, size: 28, weight: 400, maxChars: 22, maxLines: 2, lineHeight: 38 }));
+  y += 195;
+  contactLines.slice(0, 6).forEach((line) => {
+    parts.push(svgText(line, 90, y, { color: muted, size: 26, weight: 500, maxChars: 34, maxLines: 1 }));
+    y += 40;
+  });
+  y += 28;
+  if (cases.length) {
+    parts.push(`<rect x="90" y="${y}" width="720" height="${130 + cases.length * 205}" rx="18" fill="${caseBg}"/>`);
+    parts.push(svgText(card.caseTitle || "精選商品", 120, y + 48, { color: accent, size: 28, weight: 900, maxChars: 18, maxLines: 1 }));
+    y += 86;
+    cases.forEach((item, index) => {
+      const image = caseImages[index];
+      if (image) {
+        parts.push(`<clipPath id="caseClip${index}"><rect x="120" y="${y}" width="210" height="120" rx="12"/></clipPath>`);
+        parts.push(`<image href="${image}" x="120" y="${y}" width="210" height="120" preserveAspectRatio="xMidYMid slice" clip-path="url(#caseClip${index})"/>`);
+      }
+      const textX = image ? 350 : 120;
+      parts.push(svgText(item.title || `商品 ${index + 1}`, textX, y + 32, { color: text, size: 28, weight: 900, maxChars: image ? 14 : 25, maxLines: 1 }));
+      if (item.category) parts.push(svgText(item.category, textX, y + 70, { color: accent, size: 23, weight: 800, maxChars: 16, maxLines: 1 }));
+      parts.push(svgText(item.description, textX, y + 106, { color: muted, size: 22, weight: 400, maxChars: image ? 18 : 28, maxLines: 2, lineHeight: 30 }));
+      y += 200;
+    });
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1700" viewBox="0 0 900 1700">${parts.join("")}</svg>`;
 }
 
 function buildFlexBusinessCard(card, publicUrl) {
@@ -436,6 +572,38 @@ async function handleUploadImages(req, res) {
   }
 }
 
+async function handleCreateCardImage(req, res) {
+  try {
+    const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+    if (!body.card) {
+      sendJson(res, 400, { error: "missing_card", message: "missing card" });
+      return;
+    }
+
+    await fs.promises.mkdir(uploadDir, { recursive: true });
+    const svg = await buildCardPosterSvg(req, body.card);
+    const image = await sharp(Buffer.from(svg)).jpeg({ quality: 86 }).toBuffer();
+    const hash = crypto.createHash("sha256").update(image).digest("hex").slice(0, 18);
+    const filename = `${Date.now()}-${hash}.jpg`;
+    await fs.promises.writeFile(path.join(uploadDir, filename), image);
+
+    const imageUrl = `${getRequestBaseUrl(req)}/uploads/${filename}`;
+    sendJson(res, 200, {
+      imageUrl,
+      imageMessage: {
+        type: "image",
+        originalContentUrl: imageUrl,
+        previewImageUrl: imageUrl,
+      },
+    });
+  } catch (error) {
+    sendJson(res, 500, {
+      error: "card_image_failed",
+      message: error.message || "card image failed",
+    });
+  }
+}
+
 async function handleSaveCard(req, res) {
   try {
     const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
@@ -648,6 +816,10 @@ http
     }
     if (req.method === "POST" && cleanPath === "/api/upload-images") {
       await handleUploadImages(req, res);
+      return;
+    }
+    if (req.method === "POST" && cleanPath === "/api/card-image") {
+      await handleCreateCardImage(req, res);
       return;
     }
     if (req.method === "POST" && cleanPath === "/api/cards") {

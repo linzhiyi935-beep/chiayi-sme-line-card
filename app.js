@@ -679,6 +679,19 @@ async function uploadGeneratedCardImage(dataUrl) {
   };
 }
 
+async function createServerCardImageMessage(card) {
+  const response = await fetch(`${BOT_API_BASE}/api/card-image`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ card }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.imageMessage) {
+    throw new Error(data.message || data.error || "card image failed");
+  }
+  return data.imageMessage;
+}
+
 function drawRoundRect(context, x, y, width, height, radius, fill) {
   context.beginPath();
   context.moveTo(x + radius, y);
@@ -890,10 +903,16 @@ async function createCardScreenshotMessage(card = state) {
 }
 
 async function buildFriendShareMessages(publicUrl) {
-  const screenshotMessage = await createCardScreenshotMessage().catch((error) => {
-    console.warn("Card screenshot share image failed", error);
-    return null;
-  });
+  let screenshotMessage = null;
+  try {
+    screenshotMessage = await createServerCardImageMessage(state);
+  } catch (error) {
+    console.warn("Server card share image failed", error);
+    screenshotMessage = await createCardScreenshotMessage(state).catch((fallbackError) => {
+      console.warn("Card screenshot share image failed", fallbackError);
+      return null;
+    });
+  }
 
   return [screenshotMessage, buildFlexBusinessCard(publicUrl)].filter(Boolean);
 }
@@ -1069,16 +1088,22 @@ async function sendCardByOfficialAccount(url, encoded) {
   if (!idToken) return "no-token";
 
   const officialCard = await buildOfficialCardWithImages();
-  const cardImageMessage = await createCardScreenshotMessage(officialCard.card).catch((error) => {
-    console.warn("Official card screenshot image failed", error);
-    return null;
-  });
   let officialPublicUrl = url;
+  let officialMessageCard = officialCard.card;
   try {
-    officialPublicUrl = await saveOfficialCard(officialCard.card);
+    const savedOfficial = await saveCardSnapshot(officialCard.card);
+    officialPublicUrl = `${LIFF_URL}?cardId=${encodeURIComponent(savedOfficial.id)}`;
+    officialMessageCard = savedOfficial.card || officialCard.card;
   } catch (error) {
     console.warn("Saved card URL failed", error);
   }
+  const cardImageMessage = await createServerCardImageMessage(officialMessageCard).catch((error) => {
+    console.warn("Official server card image failed", error);
+    return createCardScreenshotMessage(officialMessageCard).catch((fallbackError) => {
+      console.warn("Official card screenshot image failed", fallbackError);
+      return null;
+    });
+  });
 
   const response = await fetch(`${BOT_API_BASE}/api/send-card`, {
     method: "POST",
@@ -1086,7 +1111,7 @@ async function sendCardByOfficialAccount(url, encoded) {
     body: JSON.stringify({
       idToken,
       publicUrl: officialPublicUrl,
-      card: officialCard.card,
+      card: officialMessageCard,
       imageMessage: cardImageMessage,
     }),
   });
