@@ -4,6 +4,7 @@ const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
 const sharp = require("sharp");
+const { Resvg } = require("@resvg/resvg-js");
 
 const root = __dirname;
 const port = Number(process.env.PORT || 4173);
@@ -12,7 +13,7 @@ const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
 const channelSecret = process.env.LINE_CHANNEL_SECRET || "";
 const uploadDir = path.join(os.tmpdir(), "line-card-images");
 const cardDir = path.join(os.tmpdir(), "line-card-states");
-let embeddedFontCss = "";
+let notoSansTcFontFiles = null;
 
 const types = {
   ".html": "text/html; charset=utf-8",
@@ -191,23 +192,14 @@ function imageBox(url, options = {}) {
   };
 }
 
-function getEmbeddedFontCss() {
-  if (embeddedFontCss) return embeddedFontCss;
+function getNotoSansTcFontFiles() {
+  if (notoSansTcFontFiles) return notoSansTcFontFiles;
 
-  try {
-    const cssPath = require.resolve("@fontsource-variable/noto-sans-tc/index.css");
-    const fontRoot = path.dirname(cssPath);
-    embeddedFontCss = fs.readFileSync(cssPath, "utf8").replace(/url\((\.\/files\/[^)]+)\)/g, (_match, relativePath) => {
-      const fontPath = path.join(fontRoot, relativePath.replace(/^\.\//, ""));
-      const data = fs.readFileSync(fontPath);
-      return `url(data:font/woff2;base64,${data.toString("base64")})`;
-    }).replaceAll("woff2-variations", "woff2");
-  } catch (error) {
-    console.warn("Embedded font load failed", error);
-    embeddedFontCss = "";
-  }
+  const fontPath = path.join(root, "assets", "fonts", "NotoSansTC-wght.ttf");
+  notoSansTcFontFiles = fs.existsSync(fontPath) ? [fontPath] : [];
+  if (!notoSansTcFontFiles.length) console.warn("Noto Sans TC font file is missing");
 
-  return embeddedFontCss;
+  return notoSansTcFontFiles;
 }
 
 function escapeXml(value) {
@@ -238,8 +230,9 @@ function wrapSvgText(text, maxChars, maxLines = 4) {
 function svgText(text, x, y, options = {}) {
   const lines = wrapSvgText(text, options.maxChars || 28, options.maxLines || 3);
   const lineHeight = options.lineHeight || 38;
+  const weight = options.weight || 400;
   return lines
-    .map((line, index) => `<text x="${x}" y="${y + index * lineHeight}" fill="${options.color || "#183128"}" font-size="${options.size || 28}" font-weight="${options.weight || 400}" font-family="'Noto Sans TC Variable','Noto Sans TC','Microsoft JhengHei',Arial,sans-serif">${escapeXml(line)}</text>`)
+    .map((line, index) => `<text x="${x}" y="${y + index * lineHeight}" fill="${options.color || "#183128"}" font-size="${options.size || 28}" font-weight="${weight}" font-family="'Noto Sans TC','Microsoft JhengHei',Arial,sans-serif" style="font-variation-settings:'wght' ${weight}">${escapeXml(line)}</text>`)
     .join("");
 }
 
@@ -296,10 +289,6 @@ async function buildCardPosterSvg(req, card) {
 
   let y = 470;
   const parts = [];
-  const fontCss = getEmbeddedFontCss();
-  if (fontCss) {
-    parts.push(`<defs><style><![CDATA[${fontCss} text { font-family: 'Noto Sans TC Variable','Noto Sans TC','Microsoft JhengHei',Arial,sans-serif; }]]></style></defs>`);
-  }
   parts.push(`<rect width="900" height="1700" fill="${pageBg}"/>`);
   parts.push(`<rect x="42" y="42" width="816" height="1580" rx="34" fill="${cardBg}" stroke="${border}" stroke-width="5"/>`);
   parts.push(`<clipPath id="coverClip"><rect x="72" y="72" width="756" height="260" rx="28"/></clipPath>`);
@@ -608,7 +597,15 @@ async function handleCreateCardImage(req, res) {
 
     await fs.promises.mkdir(uploadDir, { recursive: true });
     const svg = await buildCardPosterSvg(req, body.card);
-    const image = await sharp(Buffer.from(svg)).jpeg({ quality: 86 }).toBuffer();
+    const rendered = new Resvg(svg, {
+      fitTo: { mode: "width", value: 900 },
+      font: {
+        fontFiles: getNotoSansTcFontFiles(),
+        loadSystemFonts: false,
+        defaultFontFamily: "Noto Sans TC",
+      },
+    }).render();
+    const image = await sharp(rendered.asPng()).jpeg({ quality: 86 }).toBuffer();
     const hash = crypto.createHash("sha256").update(image).digest("hex").slice(0, 18);
     const filename = `${Date.now()}-${hash}.jpg`;
     await fs.promises.writeFile(path.join(uploadDir, filename), image);
