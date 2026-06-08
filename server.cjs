@@ -505,8 +505,19 @@ function buildFlexBusinessCard(card, publicUrl) {
         type: "box",
         layout: "vertical",
         backgroundColor: bg,
-        paddingAll: "18px",
-        contents,
+        paddingAll: "12px",
+        contents: [
+          {
+            type: "box",
+            layout: "vertical",
+            borderColor: border,
+            borderWidth: "2px",
+            cornerRadius: "lg",
+            paddingAll: "14px",
+            spacing: "md",
+            contents,
+          },
+        ],
       },
       footer: {
         type: "box",

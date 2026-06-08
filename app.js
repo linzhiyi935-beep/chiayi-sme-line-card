@@ -142,6 +142,7 @@ const toast = document.querySelector("#toast");
 const caseDialog = document.querySelector("#caseDialog");
 let isCardMode = hasSharedCard();
 let liffReadyPromise = null;
+let autoOfficialSendStarted = false;
 
 function getParamFromUrl(name) {
   const params = new URLSearchParams(window.location.search);
@@ -282,6 +283,14 @@ function updateShareModeActions() {
   viewShareButton.innerHTML = `<i data-lucide="send"></i>分享給好友`;
 }
 
+function makeLiffCardUrl(cardId, extraParams = {}) {
+  const params = new URLSearchParams({ cardId });
+  Object.entries(extraParams).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  return `${LIFF_URL}?${params.toString()}`;
+}
+
 async function loadSavedCardFromCurrentUrl() {
   const cardId = getParamFromUrl("cardId");
   if (!cardId) return false;
@@ -304,6 +313,10 @@ async function loadSavedCardFromCurrentUrl() {
     render(true);
 
     if (getParamFromUrl("share") === "1") showToast("請按分享給好友，選擇要傳送的 LINE 好友");
+
+    if (getParamFromUrl("send") === "official") {
+      requestAnimationFrame(() => autoSendOfficialCard());
+    }
 
     return true;
   } catch (error) {
@@ -634,8 +647,19 @@ function buildFlexBusinessCard(publicUrl) {
         type: "box",
         layout: "vertical",
         backgroundColor: bg,
-        paddingAll: "18px",
-        contents,
+        paddingAll: "12px",
+        contents: [
+          {
+            type: "box",
+            layout: "vertical",
+            borderColor: asFlexColor(state.colors.border, "#06c755"),
+            borderWidth: "2px",
+            cornerRadius: "lg",
+            paddingAll: "14px",
+            spacing: "md",
+            contents,
+          },
+        ],
       },
       footer: {
         type: "box",
@@ -1074,7 +1098,7 @@ async function saveCardSnapshot(card) {
 
 async function saveOfficialCard(card) {
   const data = await saveCardSnapshot(card);
-  return `${LIFF_URL}?cardId=${encodeURIComponent(data.id)}`;
+  return makeLiffCardUrl(data.id);
 }
 async function sendCardByOfficialAccount(url, encoded) {
   if (!window.liff || !LIFF_ID) return "unavailable";
@@ -1085,7 +1109,7 @@ async function sendCardByOfficialAccount(url, encoded) {
     try {
       const officialCard = await buildOfficialCardWithImages();
       const savedOfficial = await saveCardSnapshot(officialCard.card);
-      window.location.href = `${LIFF_URL}?cardId=${encodeURIComponent(savedOfficial.id)}`;
+      window.location.href = makeLiffCardUrl(savedOfficial.id, { send: "official" });
     } catch (error) {
       console.warn("External official card save failed", error);
       window.location.href = `${LIFF_URL}?card=${encoded}`;
@@ -1133,7 +1157,7 @@ async function sendCardByOfficialAccount(url, encoded) {
   let officialMessageCard = officialCard.card;
   try {
     const savedOfficial = await saveCardSnapshot(officialCard.card);
-    officialPublicUrl = `${LIFF_URL}?cardId=${encodeURIComponent(savedOfficial.id)}`;
+    officialPublicUrl = makeLiffCardUrl(savedOfficial.id);
     officialMessageCard = savedOfficial.card || officialCard.card;
   } catch (error) {
     console.warn("Saved card URL failed", error);
@@ -1164,6 +1188,27 @@ async function sendCardByOfficialAccount(url, encoded) {
   }
 
   return "sent";
+}
+
+function clearAutoOfficialSendParam() {
+  const cleanUrl = new URL(window.location.href);
+  cleanUrl.searchParams.delete("send");
+  const liffState = cleanUrl.searchParams.get("liff.state");
+  if (liffState) {
+    const stateParams = new URLSearchParams(liffState.replace(/^[?#]/, ""));
+    stateParams.delete("send");
+    const nextState = stateParams.toString();
+    if (nextState) cleanUrl.searchParams.set("liff.state", `?${nextState}`);
+    else cleanUrl.searchParams.delete("liff.state");
+  }
+  window.history.replaceState({}, "", cleanUrl.toString());
+}
+
+async function autoSendOfficialCard() {
+  if (autoOfficialSendStarted) return;
+  autoOfficialSendStarted = true;
+  showToast("正在接續由官方帳號發送名片");
+  await handleOfficialSendClick({ auto: true });
 }
 
 async function handleLineShareClick(event, trigger) {
@@ -1237,12 +1282,13 @@ async function handleLineShareClick(event, trigger) {
     window.location.href = liffLink;
   }, 500);
 }
-async function handleOfficialSendClick() {
+async function handleOfficialSendClick(options = {}) {
   showToast("正在處理圖片並發送名片");
   const { url, encoded } = preparePublicShare();
   try {
     const status = await sendCardByOfficialAccount(url, encoded);
     if (status === "sent") {
+      if (options.auto) clearAutoOfficialSendParam();
       showToast("官方帳號已發送完整名片");
       return;
     }
