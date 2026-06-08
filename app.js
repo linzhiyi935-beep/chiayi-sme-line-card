@@ -662,19 +662,7 @@ function buildFlexBusinessCard(publicUrl) {
   };
 }
 
-async function createCardScreenshotMessage() {
-  if (!window.html2canvas) return null;
-
-  const cardElement = document.querySelector("#cardCanvas");
-  if (!cardElement) return null;
-
-  const canvas = await window.html2canvas(cardElement, {
-    backgroundColor: null,
-    scale: Math.min(window.devicePixelRatio || 1.5, 1.5),
-    useCORS: true,
-  });
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
-
+async function uploadGeneratedCardImage(dataUrl) {
   const response = await fetch(`${BOT_API_BASE}/api/upload-images`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -689,6 +677,216 @@ async function createCardScreenshotMessage() {
     originalContentUrl: imageUrl,
     previewImageUrl: imageUrl,
   };
+}
+
+function drawRoundRect(context, x, y, width, height, radius, fill) {
+  context.beginPath();
+  context.moveTo(x + radius, y);
+  context.arcTo(x + width, y, x + width, y + height, radius);
+  context.arcTo(x + width, y + height, x, y + height, radius);
+  context.arcTo(x, y + height, x, y, radius);
+  context.arcTo(x, y, x + width, y, radius);
+  context.closePath();
+  context.fillStyle = fill;
+  context.fill();
+}
+
+function wrapTextLines(context, text, maxWidth, maxLines = 5) {
+  const chars = String(text || "").trim().split("");
+  const lines = [];
+  let line = "";
+  for (const char of chars) {
+    const test = line + char;
+    if (context.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = char;
+      if (lines.length >= maxLines) break;
+    } else {
+      line = test;
+    }
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  return lines;
+}
+
+function drawWrappedText(context, text, x, y, maxWidth, lineHeight, maxLines = 5) {
+  const lines = wrapTextLines(context, text, maxWidth, maxLines);
+  lines.forEach((line, index) => context.fillText(line, x, y + index * lineHeight));
+  return lines.length * lineHeight;
+}
+
+function loadCanvasImage(src) {
+  return new Promise((resolve) => {
+    if (!src) {
+      resolve(null);
+      return;
+    }
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () => resolve(null);
+    window.setTimeout(() => resolve(null), 5000);
+    image.src = src;
+  });
+}
+
+function drawCoverImage(context, image, x, y, width, height) {
+  if (!image) {
+    const gradient = context.createLinearGradient(x, y, x + width, y + height);
+    gradient.addColorStop(0, "#5ddf8a");
+    gradient.addColorStop(1, "#ffe16b");
+    drawRoundRect(context, x, y, width, height, 28, gradient);
+    return;
+  }
+  context.save();
+  drawRoundRect(context, x, y, width, height, 28, "#ffffff");
+  context.clip();
+  const scale = Math.max(width / image.width, height / image.height);
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  context.drawImage(image, x + (width - drawWidth) / 2, y + (height - drawHeight) / 2, drawWidth, drawHeight);
+  context.restore();
+}
+
+async function createCardPosterDataUrl(card = state) {
+  const width = 900;
+  const height = 1700;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  const colors = { ...themes[0].colors, ...(card.colors || {}) };
+  const pageBg = asFlexColor(colors.pageBg, "#e9fff2");
+  const cardBg = asFlexColor(colors.cardBg, "#ffffff");
+  const text = asFlexColor(colors.text, "#183128");
+  const muted = asFlexColor(colors.muted, "#64726d");
+  const accent = asFlexColor(colors.accent, "#19a866");
+  const border = asFlexColor(colors.border, "#06c755");
+  const chipBg = asFlexColor(colors.chipBg, "#e6f9ee");
+  const caseBg = asFlexColor(colors.caseBg, "#f6faf8");
+
+  context.fillStyle = pageBg;
+  context.fillRect(0, 0, width, height);
+  drawRoundRect(context, 40, 40, 820, 1580, 34, cardBg);
+  context.strokeStyle = border;
+  context.lineWidth = 5;
+  context.stroke();
+
+  const coverImage = await loadCanvasImage(card.cover);
+  drawCoverImage(context, coverImage, 70, 70, 760, 260);
+
+  const avatarImage = await loadCanvasImage(card.avatar);
+  context.save();
+  context.beginPath();
+  context.arc(175, 345, 80, 0, Math.PI * 2);
+  context.fillStyle = "#ffffff";
+  context.fill();
+  context.clip();
+  if (avatarImage) {
+    const scale = Math.max(160 / avatarImage.width, 160 / avatarImage.height);
+    const drawWidth = avatarImage.width * scale;
+    const drawHeight = avatarImage.height * scale;
+    context.drawImage(avatarImage, 95 + (160 - drawWidth) / 2, 265 + (160 - drawHeight) / 2, drawWidth, drawHeight);
+  } else {
+    context.fillStyle = chipBg;
+    context.fillRect(95, 265, 160, 160);
+  }
+  context.restore();
+
+  let y = 440;
+  context.fillStyle = accent;
+  context.font = "700 28px 'Noto Sans TC', sans-serif";
+  context.fillText(safeValue(card.company, ""), 90, y);
+  y += 56;
+  context.fillStyle = text;
+  context.font = "900 48px 'Noto Sans TC', sans-serif";
+  y += drawWrappedText(context, safeValue(card.displayName, "LINE 數位名片"), 90, y, 720, 58, 2);
+  context.fillStyle = muted;
+  context.font = "500 30px 'Noto Sans TC', sans-serif";
+  const names = [card.chineseName, card.englishName].filter(Boolean).join(" / ");
+  if (names) {
+    context.fillText(names, 90, y + 10);
+    y += 54;
+  }
+  context.fillStyle = text;
+  context.font = "400 30px 'Noto Sans TC', sans-serif";
+  y += drawWrappedText(context, card.bio, 90, y + 20, 720, 46, 4) + 30;
+
+  drawRoundRect(context, 90, y, 720, 150, 18, caseBg);
+  context.fillStyle = text;
+  context.font = "800 30px 'Noto Sans TC', sans-serif";
+  context.fillText("\u7522\u54c1 / \u670d\u52d9", 120, y + 48);
+  context.fillStyle = muted;
+  context.font = "400 28px 'Noto Sans TC', sans-serif";
+  drawWrappedText(context, card.products, 120, y + 92, 660, 40, 2);
+  y += 190;
+
+  context.fillStyle = muted;
+  context.font = "400 26px 'Noto Sans TC', sans-serif";
+  [
+    card.phone ? `\u96fb\u8a71\uff1a${card.phone}` : "",
+    card.lineId ? `LINE\uff1a${card.lineId}` : "",
+    card.email ? `Email\uff1a${card.email}` : "",
+    card.address ? `\u5730\u5740\uff1a${card.address}` : "",
+    card.website ? `\u7db2\u7ad9\uff1a${card.website}` : "",
+    card.social ? `\u793e\u7fa4\uff1a${card.social}` : "",
+  ].filter(Boolean).slice(0, 6).forEach((line) => {
+    context.fillText(line, 90, y);
+    y += 38;
+  });
+  y += 24;
+
+  const cases = (Array.isArray(card.cases) ? card.cases : [])
+    .filter((item) => String(item.title || item.category || item.description || item.image || "").trim())
+    .slice(0, 2);
+  if (cases.length) {
+    drawRoundRect(context, 90, y, 720, Math.min(500, 120 + cases.length * 210), 18, caseBg);
+    context.fillStyle = accent;
+    context.font = "800 28px 'Noto Sans TC', sans-serif";
+    context.fillText(safeValue(card.caseTitle, "\u7cbe\u9078\u5546\u54c1"), 120, y + 46);
+    y += 78;
+    for (const [index, item] of cases.entries()) {
+      const caseImage = await loadCanvasImage(item.image);
+      if (caseImage) {
+        drawCoverImage(context, caseImage, 120, y, 210, 120);
+      }
+      const textX = caseImage ? 350 : 120;
+      context.fillStyle = text;
+      context.font = "800 27px 'Noto Sans TC', sans-serif";
+      context.fillText(safeValue(item.title, `\u5546\u54c1 ${index + 1}`), textX, y + 32);
+      context.fillStyle = accent;
+      context.font = "700 23px 'Noto Sans TC', sans-serif";
+      if (item.category) context.fillText(item.category, textX, y + 68);
+      context.fillStyle = muted;
+      context.font = "400 22px 'Noto Sans TC', sans-serif";
+      drawWrappedText(context, item.description, textX, y + 102, caseImage ? 420 : 650, 30, 2);
+      y += 190;
+    }
+  }
+
+  return canvas.toDataURL("image/jpeg", 0.84);
+}
+
+async function createCardScreenshotMessage(card = state) {
+  let dataUrl = "";
+  try {
+    dataUrl = await createCardPosterDataUrl(card);
+  } catch (error) {
+    console.warn("Canvas card poster failed", error);
+  }
+  if (!dataUrl && window.html2canvas) {
+    const cardElement = document.querySelector("#cardCanvas");
+    if (cardElement) {
+      const canvas = await window.html2canvas(cardElement, {
+        backgroundColor: null,
+        scale: Math.min(window.devicePixelRatio || 1.5, 1.5),
+        useCORS: true,
+      });
+      dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+    }
+  }
+  if (!dataUrl) return null;
+  return uploadGeneratedCardImage(dataUrl);
 }
 
 async function buildFriendShareMessages(publicUrl) {
@@ -871,7 +1069,7 @@ async function sendCardByOfficialAccount(url, encoded) {
   if (!idToken) return "no-token";
 
   const officialCard = await buildOfficialCardWithImages();
-  const cardImageMessage = await createCardScreenshotMessage().catch((error) => {
+  const cardImageMessage = await createCardScreenshotMessage(officialCard.card).catch((error) => {
     console.warn("Official card screenshot image failed", error);
     return null;
   });
