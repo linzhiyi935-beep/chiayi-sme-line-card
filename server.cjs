@@ -184,6 +184,7 @@ function imageBox(url, options = {}) {
     size: options.size || "full",
     aspectRatio: options.aspectRatio || "16:9",
     aspectMode: "cover",
+    align: options.align || "center",
     gravity: "center",
     margin: options.margin || "none",
   };
@@ -347,6 +348,7 @@ function buildFlexBusinessCard(card, publicUrl) {
   const avatarImage = imageBox(card.avatar, {
     size: "sm",
     aspectRatio: "1:1",
+    align: "start",
     margin: "none",
   });
 
