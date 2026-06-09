@@ -482,6 +482,21 @@ function ensureLiffReady() {
   return liffReadyPromise;
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("伺服器處理逾時，已改用基本名片繼續發送");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 function buildFlexBusinessCard(publicUrl) {
   const bg = asFlexColor(state.colors.cardBg, "#ffffff");
   const text = asFlexColor(state.colors.text, "#183128");
@@ -708,11 +723,11 @@ async function uploadGeneratedCardImage(dataUrl) {
 }
 
 async function createServerCardImageMessage(card) {
-  const response = await fetch(`${BOT_API_BASE}/api/card-image`, {
+  const response = await fetchWithTimeout(`${BOT_API_BASE}/api/card-image`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ card }),
-  });
+  }, 12000);
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.imageMessage) {
     throw new Error(data.message || data.error || "card image failed");
@@ -1164,15 +1179,14 @@ async function sendCardByOfficialAccount(url, encoded) {
   } catch (error) {
     console.warn("Saved card URL failed", error);
   }
+  showToast("正在產生名片預覽");
   const cardImageMessage = await createServerCardImageMessage(officialMessageCard).catch((error) => {
     console.warn("Official server card image failed", error);
-    return createCardScreenshotMessage(officialMessageCard).catch((fallbackError) => {
-      console.warn("Official card screenshot image failed", fallbackError);
-      return null;
-    });
+    return null;
   });
 
-  const response = await fetch(`${BOT_API_BASE}/api/send-card`, {
+  showToast(cardImageMessage ? "正在由官方帳號發送名片" : "圖片產生較久，先發送可點擊名片");
+  const response = await fetchWithTimeout(`${BOT_API_BASE}/api/send-card`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1181,7 +1195,7 @@ async function sendCardByOfficialAccount(url, encoded) {
       card: officialMessageCard,
       imageMessage: cardImageMessage,
     }),
-  });
+  }, 20000);
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {

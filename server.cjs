@@ -749,7 +749,7 @@ async function handleSendCard(req, res) {
     }
     const profile = await verifyIdToken(body.idToken);
     const message = buildFlexBusinessCard(body.card, body.publicUrl);
-    await pushMessage(profile.sub, [body.imageMessage, message]);
+    await pushMessage(profile.sub, [body.imageMessage, message].filter(Boolean));
     sendJson(res, 200, { ok: true });
   } catch (error) {
     sendJson(res, 500, { error: "send_failed", message: error.message || "官方帳號發送失敗" });
