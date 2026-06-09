@@ -27,7 +27,9 @@ const PUBLIC_SITE_URL = "https://chiayi-sme-line-card.onrender.com/";
 const LIFF_ID = "2010280088-IG7ReTtB";
 const LIFF_URL = `https://liff.line.me/${LIFF_ID}`;
 const isLocalPage = ["localhost", "127.0.0.1", ""].includes(window.location.hostname) || window.location.protocol === "file:";
-const BOT_API_BASE = window.LINE_BOT_API_BASE || (isLocalPage ? PUBLIC_SITE_URL.replace(/\/$/, "") : "");
+const isRenderPage = window.location.hostname.endsWith(".onrender.com");
+const BOT_API_BASE =
+  window.LINE_BOT_API_BASE || (isRenderPage ? "" : PUBLIC_SITE_URL.replace(/\/$/, ""));
 
 const themes = [
   {
@@ -1537,8 +1539,28 @@ function fileToDataUrl(file) {
 async function fileToOptimizedDataUrl(file, options = {}) {
   const maxWidth = options.maxWidth || 1200;
   const maxHeight = options.maxHeight || 1200;
-  const dataUrl = await fileToDataUrl(file);
-  if (!file.type.startsWith("image/")) return dataUrl;
+  let imageFile = file;
+  const isHeic =
+    /image\/hei[cf]/i.test(file.type || "") ||
+    /\.(?:heic|heif)$/i.test(file.name || "");
+
+  if (isHeic) {
+    if (typeof window.heic2any !== "function") {
+      throw new Error("HEIC 圖片轉換工具尚未載入，請稍後再試");
+    }
+    const converted = await window.heic2any({
+      blob: file,
+      toType: "image/jpeg",
+      quality: 0.88,
+    });
+    imageFile = Array.isArray(converted) ? converted[0] : converted;
+  }
+
+  if (!String(imageFile.type || "").startsWith("image/")) {
+    throw new Error("請選擇 JPEG、PNG、WebP 或 HEIC 圖片");
+  }
+
+  const dataUrl = await fileToDataUrl(imageFile);
   return resizeDataImage(dataUrl, maxWidth, maxHeight);
 }
 
