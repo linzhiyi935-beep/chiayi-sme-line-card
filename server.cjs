@@ -80,7 +80,18 @@ function cloudinaryCardUrl(id) {
 }
 
 async function readCloudinaryCard(id) {
-  const response = await fetch(`${cloudinaryCardUrl(id)}?v=${Date.now()}`, { cache: "no-store" });
+  const publicId = `chiayi-line-cards/cards/${id}.json`;
+  const credentials = Buffer.from(`${cloudinaryApiKey}:${cloudinaryApiSecret}`).toString("base64");
+  const resourceResponse = await fetch(
+    `https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/resources/raw/upload?public_ids[]=${encodeURIComponent(publicId)}`,
+    {
+      headers: { Authorization: `Basic ${credentials}` },
+      cache: "no-store",
+    },
+  );
+  const resources = await resourceResponse.json().catch(() => ({}));
+  const latestUrl = resources.resources?.[0]?.secure_url || cloudinaryCardUrl(id);
+  const response = await fetch(latestUrl, { cache: "no-store" });
   if (!response.ok) throw new Error("card not found");
   return response.json();
 }
