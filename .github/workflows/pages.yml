@@ -1,0 +1,57 @@
+name: Deploy static site to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Prepare static frontend
+        shell: bash
+        run: |
+          mkdir -p _site
+          cp index.html app.js styles.css _site/
+          cp -R assets _site/assets
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('_site/app.js')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          for index, line in enumerate(lines):
+              if line.startswith('const BOT_API_BASE ='):
+                  lines[index] = 'const BOT_API_BASE = window.LINE_BOT_API_BASE || PUBLIC_SITE_URL.replace(/\/$/, "");'
+                  break
+          else:
+              raise SystemExit('Expected API configuration was not found')
+          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload static site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
