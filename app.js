@@ -308,6 +308,10 @@ async function loadSavedCardFromCurrentUrl() {
       colors: { ...defaultState.colors, ...(data.card.colors || {}) },
       cases: Array.isArray(data.card.cases) ? data.card.cases : structuredClone(defaultState.cases),
     };
+    if (data.editToken) {
+      localStorage.setItem(`lineCardEditToken:${cardId}`, data.editToken);
+      localStorage.setItem("lineCardPersistentId", cardId);
+    }
     isCardMode = true;
     applyMode();
     updateShareModeActions();
@@ -1100,15 +1104,19 @@ async function buildOfficialCardWithImages() {
 }
 
 async function saveCardSnapshot(card) {
+  const currentId = getParamFromUrl("cardId") || localStorage.getItem("lineCardPersistentId") || "";
+  const editToken = currentId ? localStorage.getItem(`lineCardEditToken:${currentId}`) || "" : "";
   const response = await fetch(`${BOT_API_BASE}/api/cards`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ card }),
+    body: JSON.stringify({ card, id: currentId, editToken }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.id) {
     throw new Error(data.message || data.error || "save card failed");
   }
+  localStorage.setItem("lineCardPersistentId", data.id);
+  if (data.editToken) localStorage.setItem(`lineCardEditToken:${data.id}`, data.editToken);
   return data;
 }
 
@@ -1254,6 +1262,7 @@ async function handleLineShareClick(event, trigger) {
           colors: { ...state.colors, ...(savedShare.card.colors || {}) },
           cases: Array.isArray(savedShare.card.cases) ? savedShare.card.cases : state.cases,
         };
+        persist();
       }
     }
   } catch (error) {

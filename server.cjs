@@ -11,6 +11,9 @@ const port = Number(process.env.PORT || 4173);
 const loginChannelId = process.env.LINE_LOGIN_CHANNEL_ID || "2010280088";
 const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
 const channelSecret = process.env.LINE_CHANNEL_SECRET || "";
+const cloudinaryCloudName = process.env.CLOUDINARY_CLOUD_NAME || "";
+const cloudinaryApiKey = process.env.CLOUDINARY_API_KEY || "";
+const cloudinaryApiSecret = process.env.CLOUDINARY_API_SECRET || "";
 const uploadDir = path.join(os.tmpdir(), "line-card-images");
 const cardDir = path.join(os.tmpdir(), "line-card-states");
 let notoSansTcFontFiles = null;
@@ -33,6 +36,91 @@ const imageTypes = {
   "image/webp": "webp",
   "image/gif": "gif",
 };
+
+function hasCloudinaryStorage() {
+  return Boolean(cloudinaryCloudName && cloudinaryApiKey && cloudinaryApiSecret);
+}
+
+function cloudinarySignature(params) {
+  const source = Object.entries(params)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("&");
+  return crypto.createHash("sha1").update(`${source}${cloudinaryApiSecret}`).digest("hex");
+}
+
+async function uploadCloudinaryAsset(buffer, options = {}) {
+  if (!hasCloudinaryStorage()) throw new Error("Cloudinary storage is not configured");
+  const resourceType = options.resourceType || "image";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const params = {
+    invalidate: "true",
+    overwrite: "true",
+    public_id: options.publicId,
+    timestamp,
+  };
+  const form = new FormData();
+  form.set("file", new Blob([buffer], { type: options.contentType || "application/octet-stream" }), options.filename || "upload");
+  form.set("api_key", cloudinaryApiKey);
+  Object.entries(params).forEach(([key, value]) => form.set(key, String(value)));
+  form.set("signature", cloudinarySignature(params));
+
+  const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/${resourceType}/upload`, {
+    method: "POST",
+    body: form,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.secure_url) throw new Error(data.error?.message || "Cloudinary upload failed");
+  return data;
+}
+
+function cloudinaryCardUrl(id) {
+  return `https://res.cloudinary.com/${cloudinaryCloudName}/raw/upload/chiayi-line-cards/cards/${id}.json`;
+}
+
+async function readCloudinaryCard(id) {
+  const response = await fetch(`${cloudinaryCardUrl(id)}?v=${Date.now()}`, { cache: "no-store" });
+  if (!response.ok) throw new Error("card not found");
+  return response.json();
+}
+
+async function writeCloudinaryCard(id, payload) {
+  await uploadCloudinaryAsset(Buffer.from(JSON.stringify(payload), "utf8"), {
+    resourceType: "raw",
+    publicId: `chiayi-line-cards/cards/${id}.json`,
+    contentType: "application/json",
+    filename: `${id}.json`,
+  });
+}
+
+async function uploadCloudinaryImage(buffer, contentType, folder = "uploads") {
+  const ext = imageTypes[contentType] || "jpg";
+  const hash = crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 18);
+  const result = await uploadCloudinaryAsset(buffer, {
+    publicId: `chiayi-line-cards/${folder}/${Date.now()}-${hash}`,
+    contentType,
+    filename: `image.${ext}`,
+  });
+  return result.secure_url;
+}
+
+async function makeCloudinaryImagePermanent(value, folder) {
+  const source = String(value || "").trim();
+  if (!/^https:\/\//i.test(source)) return source;
+  if (source.includes(`res.cloudinary.com/${cloudinaryCloudName}/`)) return source;
+  try {
+    const response = await fetch(source);
+    if (!response.ok) return source;
+    const contentType = String(response.headers.get("content-type") || "").split(";")[0].toLowerCase();
+    if (!imageTypes[contentType]) return source;
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (!buffer.length || buffer.length > 4 * 1024 * 1024) return source;
+    return uploadCloudinaryImage(buffer, contentType, folder);
+  } catch {
+    return source;
+  }
+}
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -240,6 +328,13 @@ async function imageDataUriFromLocalUrl(req, value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
   try {
+    if (/^https:\/\/res\.cloudinary\.com\//i.test(raw)) {
+      const response = await fetch(raw);
+      if (!response.ok) return "";
+      const data = Buffer.from(await response.arrayBuffer());
+      const type = String(response.headers.get("content-type") || "image/jpeg").split(";")[0];
+      return `data:${type};base64,${data.toString("base64")}`;
+    }
     const parsed = new URL(raw, getRequestBaseUrl(req));
     let filePath = "";
     if (parsed.pathname.startsWith("/uploads/")) {
@@ -573,7 +668,7 @@ async function handleUploadImages(req, res) {
     const images = Array.isArray(body.images) ? body.images.slice(0, 8) : [];
     const uploads = {};
 
-    await fs.promises.mkdir(uploadDir, { recursive: true });
+    if (!hasCloudinaryStorage()) await fs.promises.mkdir(uploadDir, { recursive: true });
 
     for (const item of images) {
       const key = String(item.key || "").replace(/[^a-z0-9_.-]/gi, "").slice(0, 80);
@@ -587,9 +682,13 @@ async function handleUploadImages(req, res) {
       if (!ext || buffer.length === 0 || buffer.length > 4 * 1024 * 1024) continue;
 
       const hash = crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 18);
-      const filename = `${Date.now()}-${hash}.${ext}`;
-      await fs.promises.writeFile(path.join(uploadDir, filename), buffer);
-      uploads[key] = `${getRequestBaseUrl(req)}/uploads/${filename}`;
+      if (hasCloudinaryStorage()) {
+        uploads[key] = await uploadCloudinaryImage(buffer, mime);
+      } else {
+        const filename = `${Date.now()}-${hash}.${ext}`;
+        await fs.promises.writeFile(path.join(uploadDir, filename), buffer);
+        uploads[key] = `${getRequestBaseUrl(req)}/uploads/${filename}`;
+      }
     }
 
     sendJson(res, 200, { uploads });
@@ -606,7 +705,7 @@ async function handleCreateCardImage(req, res) {
       return;
     }
 
-    await fs.promises.mkdir(uploadDir, { recursive: true });
+    if (!hasCloudinaryStorage()) await fs.promises.mkdir(uploadDir, { recursive: true });
     const svg = await buildCardPosterSvg(req, body.card);
     const rendered = new Resvg(svg, {
       fitTo: { mode: "width", value: 900 },
@@ -618,10 +717,14 @@ async function handleCreateCardImage(req, res) {
     }).render();
     const image = await sharp(rendered.asPng()).jpeg({ quality: 86 }).toBuffer();
     const hash = crypto.createHash("sha256").update(image).digest("hex").slice(0, 18);
-    const filename = `${Date.now()}-${hash}.jpg`;
-    await fs.promises.writeFile(path.join(uploadDir, filename), image);
-
-    const imageUrl = `${getRequestBaseUrl(req)}/uploads/${filename}`;
+    let imageUrl = "";
+    if (hasCloudinaryStorage()) {
+      imageUrl = await uploadCloudinaryImage(image, "image/jpeg", "posters");
+    } else {
+      const filename = `${Date.now()}-${hash}.jpg`;
+      await fs.promises.writeFile(path.join(uploadDir, filename), image);
+      imageUrl = `${getRequestBaseUrl(req)}/uploads/${filename}`;
+    }
     sendJson(res, 200, {
       imageUrl,
       imageMessage: {
@@ -646,8 +749,48 @@ async function handleSaveCard(req, res) {
       return;
     }
 
-    await fs.promises.mkdir(cardDir, { recursive: true });
-    const id = crypto.randomBytes(8).toString("hex");
+    if (!hasCloudinaryStorage()) await fs.promises.mkdir(cardDir, { recursive: true });
+    let id = String(body.id || "").replace(/[^a-f0-9]/gi, "");
+    let editToken = String(body.editToken || "");
+    let existing = null;
+    if (hasCloudinaryStorage() && id) {
+      existing = await readCloudinaryCard(id).catch(() => null);
+      const editTokenHash = crypto.createHash("sha256").update(editToken).digest("hex");
+      if (!existing || !editToken || editTokenHash !== existing.editTokenHash) {
+        id = "";
+        editToken = "";
+        existing = null;
+      }
+    }
+    if (!id) {
+      id = hasCloudinaryStorage() ? crypto.randomBytes(12).toString("hex") : crypto.randomBytes(8).toString("hex");
+      editToken = crypto.randomBytes(24).toString("hex");
+    }
+
+    if (hasCloudinaryStorage()) {
+      const cases = await Promise.all(
+        (Array.isArray(body.card.cases) ? body.card.cases : []).map(async (item, index) => ({
+          ...item,
+          image: await makeCloudinaryImagePermanent(item.image, `cards/${id}/case${index}`),
+        })),
+      );
+      const card = {
+        ...body.card,
+        avatar: await makeCloudinaryImagePermanent(body.card.avatar, `cards/${id}/avatar`),
+        cover: await makeCloudinaryImagePermanent(body.card.cover, `cards/${id}/cover`),
+        cases,
+      };
+      const now = new Date().toISOString();
+      await writeCloudinaryCard(id, {
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+        editTokenHash: crypto.createHash("sha256").update(editToken).digest("hex"),
+        card,
+      });
+      sendJson(res, 200, { id, editToken, url: `${getRequestBaseUrl(req)}/?cardId=${id}`, card });
+      return;
+    }
+
     const cases = await Promise.all(
       (Array.isArray(body.card.cases) ? body.card.cases : []).map(async (item, index) => ({
         ...item,
@@ -665,7 +808,7 @@ async function handleSaveCard(req, res) {
       card,
     };
     await fs.promises.writeFile(path.join(cardDir, `${id}.json`), JSON.stringify(payload), "utf8");
-    sendJson(res, 200, { id, url: `${getRequestBaseUrl(req)}/?cardId=${id}`, card });
+    sendJson(res, 200, { id, editToken, url: `${getRequestBaseUrl(req)}/?cardId=${id}`, card });
   } catch (error) {
     sendJson(res, 500, { error: "save_card_failed", message: error.message || "save card failed" });
   }
@@ -679,6 +822,18 @@ async function handleGetCard(req, res, id) {
       return;
     }
 
+    if (hasCloudinaryStorage()) {
+      const storedPayload = await readCloudinaryCard(safeId).catch(() => null);
+      if (storedPayload) {
+        sendJson(res, 200, {
+          card: storedPayload.card,
+          createdAt: storedPayload.createdAt,
+          updatedAt: storedPayload.updatedAt,
+        });
+        return;
+      }
+    }
+
     const filePath = path.join(cardDir, `${safeId}.json`);
     if (!filePath.startsWith(cardDir)) {
       sendJson(res, 403, { error: "forbidden" });
@@ -687,6 +842,28 @@ async function handleGetCard(req, res, id) {
 
     const raw = await fs.promises.readFile(filePath, "utf8");
     const payload = JSON.parse(raw);
+    if (hasCloudinaryStorage()) {
+      const card = {
+        ...payload.card,
+        avatar: await makeCloudinaryImagePermanent(payload.card.avatar, `cards/${safeId}/avatar`),
+        cover: await makeCloudinaryImagePermanent(payload.card.cover, `cards/${safeId}/cover`),
+        cases: await Promise.all(
+          (Array.isArray(payload.card.cases) ? payload.card.cases : []).map(async (item, index) => ({
+            ...item,
+            image: await makeCloudinaryImagePermanent(item.image, `cards/${safeId}/case${index}`),
+          })),
+        ),
+      };
+      const updatedAt = new Date().toISOString();
+      await writeCloudinaryCard(safeId, {
+        createdAt: payload.createdAt || updatedAt,
+        updatedAt,
+        editTokenHash: crypto.createHash("sha256").update(crypto.randomBytes(24)).digest("hex"),
+        card,
+      });
+      sendJson(res, 200, { card, createdAt: payload.createdAt, updatedAt, migrated: true });
+      return;
+    }
     sendJson(res, 200, { card: payload.card, createdAt: payload.createdAt });
   } catch {
     sendJson(res, 404, { error: "card_not_found", message: "card not found" });
@@ -841,7 +1018,7 @@ http
     const cleanPath = pathname.replace(/\/+$/, "") || "/";
 
     if (req.method === "GET" && cleanPath === "/health") {
-      sendJson(res, 200, { ok: true });
+      sendJson(res, 200, { ok: true, storage: hasCloudinaryStorage() ? "cloudinary" : "temporary" });
       return;
     }
     if (req.method === "POST" && cleanPath === "/api/send-card") {
