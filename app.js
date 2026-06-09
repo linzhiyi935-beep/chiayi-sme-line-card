@@ -1179,13 +1179,19 @@ async function sendCardByOfficialAccount(url, encoded) {
   } catch (error) {
     console.warn("Saved card URL failed", error);
   }
-  showToast("正在產生名片預覽");
-  const cardImageMessage = await createServerCardImageMessage(officialMessageCard).catch((error) => {
-    console.warn("Official server card image failed", error);
+  showToast("正在合成包含照片的名片圖片");
+  let cardImageMessage = await createCardScreenshotMessage(officialMessageCard).catch((error) => {
+    console.warn("Official client card image failed", error);
     return null;
   });
+  if (!cardImageMessage) {
+    cardImageMessage = await createServerCardImageMessage(officialMessageCard).catch((error) => {
+      console.warn("Official server card image failed", error);
+      return null;
+    });
+  }
 
-  showToast(cardImageMessage ? "正在由官方帳號發送名片" : "圖片產生較久，先發送可點擊名片");
+  showToast(cardImageMessage ? "正在由官方帳號發送完整圖片名片" : "圖片產生失敗，先發送可點擊名片");
   const response = await fetchWithTimeout(`${BOT_API_BASE}/api/send-card`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
