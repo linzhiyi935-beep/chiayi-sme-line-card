@@ -806,7 +806,7 @@ function drawCoverImage(context, image, x, y, width, height) {
 
 async function createCardPosterDataUrl(card = state) {
   const width = 900;
-  const height = 1700;
+  const height = 2100;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -823,7 +823,7 @@ async function createCardPosterDataUrl(card = state) {
 
   context.fillStyle = pageBg;
   context.fillRect(0, 0, width, height);
-  drawRoundRect(context, 40, 40, 820, 1580, 34, cardBg);
+  drawRoundRect(context, 40, 40, 820, height - 80, 34, cardBg);
   context.strokeStyle = border;
   context.lineWidth = 5;
   context.stroke();
@@ -849,7 +849,7 @@ async function createCardPosterDataUrl(card = state) {
   }
   context.restore();
 
-  let y = 440;
+  let y = 470;
   context.fillStyle = accent;
   context.font = "700 28px 'Noto Sans TC', sans-serif";
   context.fillText(safeValue(card.company, ""), 90, y);
@@ -887,8 +887,7 @@ async function createCardPosterDataUrl(card = state) {
     card.website ? `\u7db2\u7ad9\uff1a${card.website}` : "",
     card.social ? `\u793e\u7fa4\uff1a${card.social}` : "",
   ].filter(Boolean).slice(0, 6).forEach((line) => {
-    context.fillText(line, 90, y);
-    y += 38;
+    y += drawWrappedText(context, line, 90, y, 720, 38, 2);
   });
   y += 24;
 
@@ -896,7 +895,7 @@ async function createCardPosterDataUrl(card = state) {
     .filter((item) => String(item.title || item.category || item.description || item.image || "").trim())
     .slice(0, 2);
   if (cases.length) {
-    drawRoundRect(context, 90, y, 720, Math.min(500, 120 + cases.length * 210), 18, caseBg);
+    drawRoundRect(context, 90, y, 720, 110 + cases.length * 200, 18, caseBg);
     context.fillStyle = accent;
     context.font = "800 28px 'Noto Sans TC', sans-serif";
     context.fillText(safeValue(card.caseTitle, "\u7cbe\u9078\u5546\u54c1"), 120, y + 46);
