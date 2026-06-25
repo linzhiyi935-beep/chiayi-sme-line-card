@@ -30,6 +30,7 @@ const isLocalPage = ["localhost", "127.0.0.1", ""].includes(window.location.host
 const isRenderPage = window.location.hostname.endsWith(".onrender.com");
 const BOT_API_BASE =
   window.LINE_BOT_API_BASE || (isRenderPage ? "" : PUBLIC_SITE_URL.replace(/\/$/, ""));
+const PENDING_OFFICIAL_CARD_KEY = "lineCardPendingOfficialCardId";
 
 const themes = [
   {
@@ -291,14 +292,6 @@ function makeLiffCardUrl(cardId, extraParams = {}) {
     if (value) params.set(key, value);
   });
   return `${LIFF_URL}?${params.toString()}`;
-}
-
-function makeWebCardUrl(cardId, extraParams = {}) {
-  const params = new URLSearchParams({ cardId });
-  Object.entries(extraParams).forEach(([key, value]) => {
-    if (value) params.set(key, value);
-  });
-  return `${PUBLIC_SITE_URL}?${params.toString()}`;
 }
 
 async function loadSavedCardFromCurrentUrl() {
@@ -1142,10 +1135,11 @@ async function sendCardByOfficialAccount(url, encoded) {
       try {
         const officialCard = await buildOfficialCardWithImages();
         const savedOfficial = await saveCardSnapshot(officialCard.card);
-        window.liff.login({ redirectUri: makeWebCardUrl(savedOfficial.id, { send: "official" }) });
+        localStorage.setItem(PENDING_OFFICIAL_CARD_KEY, savedOfficial.id);
+        window.liff.login();
       } catch (error) {
         console.warn("External official card save before login failed", error);
-        window.liff.login({ redirectUri: window.location.href });
+        window.liff.login();
       }
     } else {
       window.liff.login({ redirectUri: window.location.href });
@@ -1247,6 +1241,35 @@ async function autoSendOfficialCard() {
   await handleOfficialSendClick({ auto: true });
 }
 
+async function resumePendingOfficialSend() {
+  const pendingCardId = localStorage.getItem(PENDING_OFFICIAL_CARD_KEY);
+  if (!pendingCardId || getParamFromUrl("cardId")) return;
+
+  try {
+    await ensureLiffReady();
+    if (!window.liff?.isLoggedIn?.()) return;
+
+    const response = await fetch(`${BOT_API_BASE}/api/cards/${encodeURIComponent(pendingCardId)}`);
+    const data = await response.json();
+    if (!response.ok || !data.card) throw new Error(data.message || data.error || "card not found");
+
+    state = {
+      ...structuredClone(defaultState),
+      ...data.card,
+      colors: { ...defaultState.colors, ...(data.card.colors || {}) },
+      cases: Array.isArray(data.card.cases) ? data.card.cases : structuredClone(defaultState.cases),
+    };
+    isCardMode = true;
+    applyMode();
+    syncInputs();
+    render(true);
+    autoOfficialSendStarted = false;
+    await autoSendOfficialCard();
+  } catch (error) {
+    console.warn("Pending official send resume failed", error);
+  }
+}
+
 async function handleLineShareClick(event, trigger) {
   event?.preventDefault();
   showToast("\u6b63\u5728\u7522\u751f\u540d\u7247\u5716\u7247\u4e26\u958b\u555f LINE \u597d\u53cb\u9078\u64c7");
@@ -1325,6 +1348,7 @@ async function handleOfficialSendClick(options = {}) {
   try {
     const status = await sendCardByOfficialAccount(url, encoded);
     if (status === "sent") {
+      localStorage.removeItem(PENDING_OFFICIAL_CARD_KEY);
       if (options.auto) clearAutoOfficialSendParam();
       showToast("官方帳號已發送完整名片");
       return;
@@ -1778,6 +1802,7 @@ attachEvents();
 applyMode();
 render(true);
 loadSavedCardFromCurrentUrl();
+resumePendingOfficialSend();
 if (getParamFromUrl("cardId")) {
   ensureLiffReady().catch((error) => console.warn("LIFF init preload failed", error));
 }
