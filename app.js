@@ -293,6 +293,14 @@ function makeLiffCardUrl(cardId, extraParams = {}) {
   return `${LIFF_URL}?${params.toString()}`;
 }
 
+function makeWebCardUrl(cardId, extraParams = {}) {
+  const params = new URLSearchParams({ cardId });
+  Object.entries(extraParams).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  return `${PUBLIC_SITE_URL}?${params.toString()}`;
+}
+
 async function loadSavedCardFromCurrentUrl() {
   const cardId = getParamFromUrl("cardId");
   if (!cardId) return false;
@@ -1134,7 +1142,7 @@ async function sendCardByOfficialAccount(url, encoded) {
       try {
         const officialCard = await buildOfficialCardWithImages();
         const savedOfficial = await saveCardSnapshot(officialCard.card);
-        window.liff.login({ redirectUri: makeLiffCardUrl(savedOfficial.id, { send: "official" }) });
+        window.liff.login({ redirectUri: makeWebCardUrl(savedOfficial.id, { send: "official" }) });
       } catch (error) {
         console.warn("External official card save before login failed", error);
         window.liff.login({ redirectUri: window.location.href });
