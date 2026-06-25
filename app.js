@@ -1129,25 +1129,24 @@ async function sendCardByOfficialAccount(url, encoded) {
 
   await ensureLiffReady();
 
-  if (!window.liff.isInClient()) {
-    try {
-      const officialCard = await buildOfficialCardWithImages();
-      const savedOfficial = await saveCardSnapshot(officialCard.card);
-      window.location.href = makeLiffCardUrl(savedOfficial.id, { send: "official" });
-    } catch (error) {
-      console.warn("External official card save failed", error);
-      window.location.href = `${LIFF_URL}?card=${encoded}`;
-    }
-    return "external";
-  }
-
   if (!window.liff.isLoggedIn()) {
-    window.liff.login({ redirectUri: window.location.href });
+    if (!window.liff.isInClient()) {
+      try {
+        const officialCard = await buildOfficialCardWithImages();
+        const savedOfficial = await saveCardSnapshot(officialCard.card);
+        window.liff.login({ redirectUri: makeLiffCardUrl(savedOfficial.id, { send: "official" }) });
+      } catch (error) {
+        console.warn("External official card save before login failed", error);
+        window.liff.login({ redirectUri: window.location.href });
+      }
+    } else {
+      window.liff.login({ redirectUri: window.location.href });
+    }
     return "login";
   }
 
   let canCheckFriendship = true;
-  if (typeof window.liff.getFriendship === "function") {
+  if (window.liff.isInClient() && typeof window.liff.getFriendship === "function") {
     try {
       const friendship = await window.liff.getFriendship();
       if (!friendship.friendFlag) {
@@ -1165,7 +1164,7 @@ async function sendCardByOfficialAccount(url, encoded) {
     }
   }
 
-  if (!canCheckFriendship && typeof window.liff.requestFriendship === "function") {
+  if (window.liff.isInClient() && !canCheckFriendship && typeof window.liff.requestFriendship === "function") {
     try {
       await window.liff.requestFriendship();
     } catch (error) {
