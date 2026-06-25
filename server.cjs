@@ -14,6 +14,7 @@ const channelSecret = process.env.LINE_CHANNEL_SECRET || "";
 const cloudinaryCloudName = process.env.CLOUDINARY_CLOUD_NAME || "";
 const cloudinaryApiKey = process.env.CLOUDINARY_API_KEY || "";
 const cloudinaryApiSecret = process.env.CLOUDINARY_API_SECRET || "";
+const adminExportToken = process.env.ADMIN_EXPORT_TOKEN || "";
 const uploadDir = path.join(os.tmpdir(), "line-card-images");
 const cardDir = path.join(os.tmpdir(), "line-card-states");
 let notoSansTcFontFiles = null;
@@ -96,6 +97,31 @@ async function readCloudinaryCard(id) {
   return response.json();
 }
 
+async function listCloudinaryCardResources() {
+  const credentials = Buffer.from(`${cloudinaryApiKey}:${cloudinaryApiSecret}`).toString("base64");
+  const resources = [];
+  let nextCursor = "";
+
+  do {
+    const params = new URLSearchParams({
+      prefix: "chiayi-line-cards/cards/",
+      max_results: "100",
+    });
+    if (nextCursor) params.set("next_cursor", nextCursor);
+
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/resources/raw/upload?${params}`, {
+      headers: { Authorization: `Basic ${credentials}` },
+      cache: "no-store",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error?.message || "Cloudinary list failed");
+    resources.push(...(data.resources || []));
+    nextCursor = data.next_cursor || "";
+  } while (nextCursor);
+
+  return resources;
+}
+
 async function writeCloudinaryCard(id, payload) {
   await uploadCloudinaryAsset(Buffer.from(JSON.stringify(payload), "utf8"), {
     resourceType: "raw",
@@ -103,6 +129,32 @@ async function writeCloudinaryCard(id, payload) {
     contentType: "application/json",
     filename: `${id}.json`,
   });
+}
+
+function summarizeStoredCard(id, payload) {
+  const card = payload.card || {};
+  const cases = Array.isArray(card.cases) ? card.cases : [];
+  return {
+    id,
+    createdAt: payload.createdAt || "",
+    updatedAt: payload.updatedAt || "",
+    displayName: card.displayName || "",
+    company: card.company || "",
+    chineseName: card.chineseName || "",
+    englishName: card.englishName || "",
+    phone: card.phone || "",
+    lineId: card.lineId || "",
+    website: card.website || "",
+    avatarShape: card.avatarShape || "",
+    avatarEffect: card.avatarEffect || "",
+    colors: card.colors || {},
+    hasAvatar: Boolean(card.avatar),
+    hasCover: Boolean(card.cover),
+    caseCount: cases.length,
+    caseTitles: cases.map((item) => item.title || "").filter(Boolean),
+    publicUrl: `https://liff.line.me/2010280088-IG7ReTtB?cardId=${id}`,
+    card,
+  };
 }
 
 async function uploadCloudinaryImage(buffer, contentType, folder = "uploads") {
@@ -881,6 +933,56 @@ async function handleGetCard(req, res, id) {
   }
 }
 
+async function handleAdminCards(req, res) {
+  try {
+    const url = new URL(req.url, "http://localhost");
+    const token = url.searchParams.get("token") || req.headers.authorization?.replace(/^Bearer\s+/i, "") || "";
+    if (!adminExportToken || token !== adminExportToken) {
+      sendJson(res, 403, { error: "forbidden", message: "admin export token is required" });
+      return;
+    }
+
+    const cards = [];
+
+    if (hasCloudinaryStorage()) {
+      const resources = await listCloudinaryCardResources();
+      for (const resource of resources) {
+        const match = String(resource.public_id || "").match(/chiayi-line-cards\/cards\/([a-f0-9]+)\.json$/i);
+        if (!match) continue;
+        try {
+          const response = await fetch(resource.secure_url, { cache: "no-store" });
+          if (!response.ok) continue;
+          const payload = await response.json();
+          cards.push(summarizeStoredCard(match[1], payload));
+        } catch {
+          // Skip unreadable historical records and keep exporting the rest.
+        }
+      }
+    } else {
+      await fs.promises.mkdir(cardDir, { recursive: true });
+      const files = await fs.promises.readdir(cardDir);
+      for (const file of files.filter((name) => /^[a-f0-9]+\.json$/i.test(name))) {
+        const id = file.replace(/\.json$/i, "");
+        try {
+          const payload = JSON.parse(await fs.promises.readFile(path.join(cardDir, file), "utf8"));
+          cards.push(summarizeStoredCard(id, payload));
+        } catch {
+          // Skip unreadable historical records and keep exporting the rest.
+        }
+      }
+    }
+
+    cards.sort((left, right) => String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt)));
+    sendJson(res, 200, {
+      count: cards.length,
+      storage: hasCloudinaryStorage() ? "cloudinary" : "temporary",
+      cards,
+    });
+  } catch (error) {
+    sendJson(res, 500, { error: "admin_cards_failed", message: error.message || "admin cards export failed" });
+  }
+}
+
 async function handleGetCardImage(req, res, id, key) {
   const safeId = String(id || "").replace(/[^a-f0-9]/gi, "");
   const requested = String(key || "").toLowerCase();
@@ -1046,6 +1148,10 @@ http
     }
     if (req.method === "POST" && cleanPath === "/api/cards") {
       await handleSaveCard(req, res);
+      return;
+    }
+    if (req.method === "GET" && cleanPath === "/api/admin/cards") {
+      await handleAdminCards(req, res);
       return;
     }
     const cardImageMatch = cleanPath.match(/^\/api\/cards\/([a-f0-9]+)\/image\/((?:avatar|cover|case\d+)(?:\.(?:jpg|jpeg|png|webp|gif))?)$/i);
