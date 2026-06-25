@@ -933,53 +933,270 @@ async function handleGetCard(req, res, id) {
   }
 }
 
+function getAdminToken(req) {
+  const url = new URL(req.url, "http://localhost");
+  return url.searchParams.get("token") || req.headers.authorization?.replace(/^Bearer\s+/i, "") || "";
+}
+
+function htmlEscape(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatTaiwanTime(value) {
+  if (!value) return "";
+  try {
+    return new Intl.DateTimeFormat("zh-TW", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return String(value);
+  }
+}
+
+function renderAdminImage(src, alt, className = "") {
+  if (!src) return `<div class="imagePlaceholder ${className}">沒有圖片</div>`;
+  return `<img class="${className}" src="${htmlEscape(src)}" alt="${htmlEscape(alt)}" loading="lazy">`;
+}
+
+async function collectAdminCards() {
+  const cards = [];
+
+  if (hasCloudinaryStorage()) {
+    const resources = await listCloudinaryCardResources();
+    for (const resource of resources) {
+      const match = String(resource.public_id || "").match(/chiayi-line-cards\/cards\/([a-f0-9]+)\.json$/i);
+      if (!match) continue;
+      try {
+        const response = await fetch(resource.secure_url, { cache: "no-store" });
+        if (!response.ok) continue;
+        const payload = await response.json();
+        cards.push(summarizeStoredCard(match[1], payload));
+      } catch {
+        // Skip unreadable historical records and keep exporting the rest.
+      }
+    }
+  } else {
+    await fs.promises.mkdir(cardDir, { recursive: true });
+    const files = await fs.promises.readdir(cardDir);
+    for (const file of files.filter((name) => /^[a-f0-9]+\.json$/i.test(name))) {
+      const id = file.replace(/\.json$/i, "");
+      try {
+        const payload = JSON.parse(await fs.promises.readFile(path.join(cardDir, file), "utf8"));
+        cards.push(summarizeStoredCard(id, payload));
+      } catch {
+        // Skip unreadable historical records and keep exporting the rest.
+      }
+    }
+  }
+
+  cards.sort((left, right) => String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt)));
+  return {
+    count: cards.length,
+    storage: hasCloudinaryStorage() ? "cloudinary" : "temporary",
+    cards,
+  };
+}
+
+function renderAdminCardsPage(data, token) {
+  const cards = data.cards
+    .map((item) => {
+      const card = item.card || {};
+      const cases = Array.isArray(card.cases) ? card.cases : [];
+      const caseImages = cases
+        .filter((caseItem) => caseItem.image)
+        .slice(0, 6)
+        .map(
+          (caseItem) => `
+            <a class="caseImage" href="${htmlEscape(caseItem.image)}" target="_blank" rel="noreferrer">
+              ${renderAdminImage(caseItem.image, caseItem.title || "作品圖片")}
+              <span>${htmlEscape(caseItem.title || "作品圖片")}</span>
+            </a>
+          `,
+        )
+        .join("");
+
+      return `
+        <article class="adminCard">
+          <div class="mediaRow">
+            <a class="cover" href="${htmlEscape(card.cover || "#")}" target="_blank" rel="noreferrer">
+              ${renderAdminImage(card.cover, `${item.displayName} 封面`, "coverImage")}
+            </a>
+            <a class="avatar" href="${htmlEscape(card.avatar || "#")}" target="_blank" rel="noreferrer">
+              ${renderAdminImage(card.avatar, `${item.displayName} 大頭貼`, "avatarImage")}
+            </a>
+          </div>
+          <div class="cardBody">
+            <div class="meta">${htmlEscape(formatTaiwanTime(item.updatedAt || item.createdAt))}</div>
+            <h2>${htmlEscape(item.displayName || "未命名名片")}</h2>
+            <p class="company">${htmlEscape(item.company || "沒有公司名稱")}</p>
+            <dl>
+              <div><dt>姓名</dt><dd>${htmlEscape([item.chineseName, item.englishName].filter(Boolean).join(" / ") || "未填")}</dd></div>
+              <div><dt>電話</dt><dd>${htmlEscape(item.phone || "未填")}</dd></div>
+              <div><dt>LINE</dt><dd>${htmlEscape(item.lineId || "未填")}</dd></div>
+            </dl>
+            <div class="actions">
+              <a href="${htmlEscape(item.publicUrl)}" target="_blank" rel="noreferrer">開啟名片</a>
+              <a href="/api/admin/cards?token=${encodeURIComponent(token)}" target="_blank" rel="noreferrer">原始資料</a>
+            </div>
+            ${caseImages ? `<div class="cases"><h3>作品 / 菜單圖片</h3><div class="caseGrid">${caseImages}</div></div>` : ""}
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LINE 數位名片後台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+      color: #172534;
+      background: #eef8f2;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px; }
+    header { max-width: 1180px; margin: 0 auto 22px; }
+    h1 { margin: 0 0 8px; font-size: clamp(28px, 4vw, 44px); line-height: 1.15; }
+    .summary { margin: 0; color: #52635b; font-size: 17px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+    .toolbar a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      padding: 0 16px;
+      border-radius: 8px;
+      background: #06c755;
+      color: white;
+      font-weight: 800;
+      text-decoration: none;
+    }
+    main { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+    .adminCard {
+      overflow: hidden;
+      border: 1px solid #d7e5df;
+      border-radius: 12px;
+      background: white;
+      box-shadow: 0 12px 36px rgba(23, 37, 52, .08);
+    }
+    .mediaRow { position: relative; min-height: 180px; background: #dfeee8; }
+    .cover { display: block; height: 190px; background: #dfeee8; }
+    .coverImage { width: 100%; height: 190px; object-fit: cover; display: block; }
+    .avatar {
+      position: absolute;
+      left: 18px;
+      bottom: -34px;
+      width: 84px;
+      height: 84px;
+      border: 5px solid white;
+      border-radius: 50%;
+      overflow: hidden;
+      background: #f5faf8;
+      box-shadow: 0 10px 24px rgba(23, 37, 52, .18);
+    }
+    .avatarImage { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .imagePlaceholder {
+      display: grid;
+      place-items: center;
+      width: 100%;
+      height: 100%;
+      color: #789188;
+      font-weight: 800;
+      background: repeating-linear-gradient(135deg, #edf5f1, #edf5f1 12px, #e3eee8 12px, #e3eee8 24px);
+    }
+    .cardBody { padding: 48px 20px 20px; }
+    .meta { color: #6a7b74; font-size: 14px; margin-bottom: 8px; }
+    h2 { margin: 0; font-size: 25px; line-height: 1.25; }
+    .company { margin: 8px 0 16px; color: #0f9960; font-weight: 800; }
+    dl { display: grid; gap: 8px; margin: 0; }
+    dl div { display: grid; grid-template-columns: 56px 1fr; gap: 8px; }
+    dt { color: #6a7b74; font-weight: 800; }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+    .actions a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+      padding: 0 14px;
+      border-radius: 8px;
+      border: 1px solid #06c755;
+      color: #087b46;
+      font-weight: 800;
+      text-decoration: none;
+    }
+    .cases { margin-top: 18px; padding-top: 16px; border-top: 1px solid #e5eeea; }
+    .cases h3 { margin: 0 0 10px; font-size: 17px; }
+    .caseGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .caseImage { display: block; color: #172534; text-decoration: none; }
+    .caseImage img, .caseImage .imagePlaceholder { width: 100%; aspect-ratio: 1; height: auto; object-fit: cover; border-radius: 8px; }
+    .caseImage span { display: block; margin-top: 4px; font-size: 12px; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    @media (max-width: 620px) {
+      body { padding: 18px; }
+      main { grid-template-columns: 1fr; }
+      .caseGrid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>LINE 數位名片後台</h1>
+    <p class="summary">目前找到 ${data.count} 張名片，儲存位置：${htmlEscape(data.storage)}。點圖片可以放大查看。</p>
+    <div class="toolbar">
+      <a href="/api/admin/cards?token=${encodeURIComponent(token)}" target="_blank" rel="noreferrer">下載原始資料</a>
+    </div>
+  </header>
+  <main>${cards || "<p>目前沒有名片資料。</p>"}</main>
+</body>
+</html>`;
+}
+
 async function handleAdminCards(req, res) {
   try {
-    const url = new URL(req.url, "http://localhost");
-    const token = url.searchParams.get("token") || req.headers.authorization?.replace(/^Bearer\s+/i, "") || "";
+    const token = getAdminToken(req);
     if (!adminExportToken || token !== adminExportToken) {
       sendJson(res, 403, { error: "forbidden", message: "admin export token is required" });
       return;
     }
 
-    const cards = [];
-
-    if (hasCloudinaryStorage()) {
-      const resources = await listCloudinaryCardResources();
-      for (const resource of resources) {
-        const match = String(resource.public_id || "").match(/chiayi-line-cards\/cards\/([a-f0-9]+)\.json$/i);
-        if (!match) continue;
-        try {
-          const response = await fetch(resource.secure_url, { cache: "no-store" });
-          if (!response.ok) continue;
-          const payload = await response.json();
-          cards.push(summarizeStoredCard(match[1], payload));
-        } catch {
-          // Skip unreadable historical records and keep exporting the rest.
-        }
-      }
-    } else {
-      await fs.promises.mkdir(cardDir, { recursive: true });
-      const files = await fs.promises.readdir(cardDir);
-      for (const file of files.filter((name) => /^[a-f0-9]+\.json$/i.test(name))) {
-        const id = file.replace(/\.json$/i, "");
-        try {
-          const payload = JSON.parse(await fs.promises.readFile(path.join(cardDir, file), "utf8"));
-          cards.push(summarizeStoredCard(id, payload));
-        } catch {
-          // Skip unreadable historical records and keep exporting the rest.
-        }
-      }
-    }
-
-    cards.sort((left, right) => String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt)));
-    sendJson(res, 200, {
-      count: cards.length,
-      storage: hasCloudinaryStorage() ? "cloudinary" : "temporary",
-      cards,
-    });
+    sendJson(res, 200, await collectAdminCards());
   } catch (error) {
     sendJson(res, 500, { error: "admin_cards_failed", message: error.message || "admin cards export failed" });
+  }
+}
+
+async function handleAdminCardsPage(req, res) {
+  try {
+    const token = getAdminToken(req);
+    if (!adminExportToken || token !== adminExportToken) {
+      res.writeHead(403, { "Content-Type": "text/html; charset=utf-8" });
+      res.end("<!doctype html><meta charset=\"utf-8\"><title>Forbidden</title><p>後台 token 不正確。</p>");
+      return;
+    }
+    const html = renderAdminCardsPage(await collectAdminCards(), token);
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+    res.end(html);
+  } catch (error) {
+    res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(`<!doctype html><meta charset="utf-8"><title>Error</title><p>${htmlEscape(error.message || "後台讀取失敗")}</p>`);
   }
 }
 
@@ -1152,6 +1369,10 @@ http
     }
     if (req.method === "GET" && cleanPath === "/api/admin/cards") {
       await handleAdminCards(req, res);
+      return;
+    }
+    if (req.method === "GET" && cleanPath === "/admin/cards") {
+      await handleAdminCardsPage(req, res);
       return;
     }
     const cardImageMatch = cleanPath.match(/^\/api\/cards\/([a-f0-9]+)\/image\/((?:avatar|cover|case\d+)(?:\.(?:jpg|jpeg|png|webp|gif))?)$/i);
